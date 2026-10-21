@@ -1,0 +1,128 @@
+name: SafeAgent signed release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing protected tag: safeagent-vMAJOR.MINOR.PATCH'
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: safeagent-release
+  cancel-in-progress: false
+jobs:
+  sign:
+    if: vars.SAFEAGENT_PRODUCTION_RELEASE_ENABLED == 'true'
+    environment: safeagent-signing
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            arch: x64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            arch: arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      SAFEAGENT_ALLOWED_EXTENSION_IDS: ${{ vars.SAFEAGENT_ALLOWED_EXTENSION_IDS }}
+      SAFEAGENT_AUTH_PUBLIC_KEYS: ${{ vars.SAFEAGENT_AUTH_PUBLIC_KEYS }}
+    steps:
+      - name: Require protected dispatch ref
+        shell: bash
+        working-directory: .
+        run: |
+          test "$GITHUB_REF_PROTECTED" = true
+          test "$GITHUB_REF_TYPE" = tag
+          test "$GITHUB_REF_NAME" = "$RELEASE_TAG"
+          [[ "$RELEASE_TAG" =~ ^safeagent-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$SAFEAGENT_ALLOWED_EXTENSION_IDS" =~ ^[a-p]{32}(,[a-p]{32})*$ ]]
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Require tag to match Cargo version
+        shell: bash
+        run: |
+          cargo metadata --no-deps --format-version 1 > "$RUNNER_TEMP/safeagent-metadata.json"
+          python -c 'import json,os; p=next(p for p in json.load(open(os.environ["RUNNER_TEMP"]+"/safeagent-metadata.json"))["packages"] if p["name"]=="safeagent"); assert os.environ["RELEASE_TAG"]=="safeagent-v"+p["version"]'
+      - name: Validate authorization keys before signing preparation
+        run: cargo run --locked --example validate-auth-config
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+      - name: Test release source
+        run: cargo test --locked --target ${{ matrix.target }}
+      - name: Build and sign Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ vars.WINDOWS_TIMESTAMP_URL }}
+        run: ./packaging/build-windows.ps1 -ExtensionIds $env:SAFEAGENT_ALLOWED_EXTENSION_IDS -Release
+      - name: Prepare macOS signing keychain
+        if: runner.os == 'macOS'
+        env:
+          MACOS_CERTIFICATES_BASE64: ${{ secrets.MACOS_CERTIFICATES_BASE64 }}
+          MACOS_CERTIFICATES_PASSWORD: ${{ secrets.MACOS_CERTIFICATES_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          MACOS_INSTALLER_IDENTITY: ${{ vars.MACOS_INSTALLER_IDENTITY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: bash packaging/prepare-macos-signing.sh
+      - name: Sign notarize and staple macOS installer
+        if: runner.os == 'macOS'
+        env:
+          MACOS_SIGNING_IDENTITY: ${{ vars.MACOS_SIGNING_IDENTITY }}
+          MACOS_INSTALLER_IDENTITY: ${{ vars.MACOS_INSTALLER_IDENTITY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: bash packaging/build-macos.sh '${{ matrix.arch }}' "$SAFEAGENT_ALLOWED_EXTENSION_IDS" --release
+      - name: Remove macOS signing material
+        if: always() && runner.os == 'macOS'
+        run: |
+          security delete-keychain "$RUNNER_TEMP/safeagent-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/safeagent-certificates.p12" "$RUNNER_TEMP/safeagent-notary.p8"
+      - name: Smoke actual native binary
+        run: python packaging/smoke-native.py target/${{ matrix.target }}/release/safeagent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safeagent-signed-${{ runner.os }}-${{ matrix.arch }}
+          path: |
+            dist/*-SIGNED.exe
+            dist/*-SIGNED-NOTARIZED.pkg
+          if-no-files-found: error
+          retention-days: 30
+  publish:
+    if: vars.SAFEAGENT_PRODUCTION_RELEASE_ENABLED == 'true'
+    needs: sign
+    environment: safeagent-publishing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: safeagent-signed-*
+          merge-multiple: true
+          path: release
+      - name: Publish approved signed artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(release/*-SIGNED.exe release/*-SIGNED-NOTARIZED.pkg)
+          test "${#files[@]}" -eq 3
+          sha256sum "${files[@]}" > release/SHA256SUMS
+          gh release create "$RELEASE_TAG" "${files[@]}" release/SHA256SUMS --verify-tag --title "SafeAgent ${RELEASE_TAG#safeagent-}" --notes 'Signed native installers. Install, repair, upgrade, rollback, or uninstall only outside active assessments. Local observations are not trusted attestation.'

@@ -1,0 +1,58 @@
+name: SafeAgent native CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            arch: x64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            arch: arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    env:
+      # Explicit test-only identity, never an implicit runtime default or prod identity.
+      SAFEAGENT_ALLOWED_EXTENSION_IDS: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+      - name: Test native target
+        run: cargo test --locked --target ${{ matrix.target }}
+      - name: Test internal distribution configuration gates
+        run: cargo test --locked --example validate-auth-config
+      - name: Test internal distribution provenance and catalog (no cloud access)
+        run: |
+          python -B packaging/test-internal-dev-provenance.py
+          python -B packaging/test-internal-dev-catalog.py
+      - name: Test actual binary authorization with ephemeral keys
+        run: cargo test --locked --test binary-authorization -- --ignored
+      - name: Build Windows development installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/build-windows.ps1 -ExtensionIds $env:SAFEAGENT_ALLOWED_EXTENSION_IDS
+      - name: Build macOS development installer
+        if: runner.os == 'macOS'
+        run: bash packaging/build-macos.sh '${{ matrix.arch }}' "$SAFEAGENT_ALLOWED_EXTENSION_IDS"
+      - name: Smoke actual native binary
+        run: python packaging/smoke-native.py target/${{ matrix.target }}/release/safeagent
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safeagent-${{ runner.os }}-${{ matrix.arch }}-UNSIGNED-DEV
+          path: |
+            dist/*UNSIGNED-DEV.exe
+            dist/*UNSIGNED-DEV.pkg
+          if-no-files-found: error
+          retention-days: 14

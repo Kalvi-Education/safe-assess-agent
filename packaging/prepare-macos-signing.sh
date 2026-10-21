@@ -1,0 +1,26 @@
+#!/bin/bash
+set -euo pipefail
+: "${RUNNER_TEMP:?CI temporary directory required}"
+: "${GITHUB_ENV:?GitHub Actions environment required}"
+: "${MACOS_CERTIFICATES_BASE64:?P12 containing Application and Installer certificates required}"
+: "${MACOS_CERTIFICATES_PASSWORD:?P12 password required}"
+: "${MACOS_KEYCHAIN_PASSWORD:?Temporary keychain password required}"
+: "${APPLE_API_KEY_BASE64:?App Store Connect API private key required}"
+: "${MACOS_SIGNING_IDENTITY:?Application identity required}"
+: "${MACOS_INSTALLER_IDENTITY:?Installer identity required}"
+: "${APPLE_API_KEY_ID:?API key ID required}"
+: "${APPLE_API_ISSUER_ID:?API issuer required}"
+umask 077
+keychain="$RUNNER_TEMP/safeagent-signing.keychain-db"
+p12="$RUNNER_TEMP/safeagent-certificates.p12"
+key="$RUNNER_TEMP/safeagent-notary.p8"
+printf '%s' "$MACOS_CERTIFICATES_BASE64" | base64 --decode > "$p12"
+printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$key"
+security create-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$keychain"
+security set-keychain-settings -lut 21600 "$keychain"
+security unlock-keychain -p "$MACOS_KEYCHAIN_PASSWORD" "$keychain"
+security import "$p12" -k "$keychain" -P "$MACOS_CERTIFICATES_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild
+security set-key-partition-list -S apple-tool:,apple: -k "$MACOS_KEYCHAIN_PASSWORD" "$keychain"
+security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+rm -f "$p12"
+printf 'APPLE_API_KEY_PATH=%s\n' "$key" >> "$GITHUB_ENV"

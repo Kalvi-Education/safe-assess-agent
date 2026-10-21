@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+if pgrep -x safeagent >/dev/null || pgrep -x 'Google Chrome' >/dev/null; then
+  echo 'Finish all assessments and close Chrome and SafeAgent for every user before installing or repairing.' >&2
+  exit 1
+fi

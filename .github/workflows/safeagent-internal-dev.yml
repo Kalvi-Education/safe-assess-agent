@@ -1,0 +1,166 @@
+name: SafeAgent internal Dev packages (unsigned)
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Reviewed full 40-character commit SHA reachable from main'
+        required: true
+        type: string
+      publish_to_dev_gcs:
+        description: 'Opt in to approved private Dev GCS publication after ALL packages succeed'
+        required: true
+        default: false
+        type: boolean
+permissions:
+  contents: read
+jobs:
+  package:
+    environment: safeagent-internal-dev
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            arch: x64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            arch: arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      TARGET: ${{ matrix.target }}
+      SAFEAGENT_ALLOWED_EXTENSION_IDS: ${{ vars.SAFEAGENT_ALLOWED_EXTENSION_IDS }}
+      SAFEAGENT_AUTH_PUBLIC_KEYS: ${{ vars.SAFEAGENT_AUTH_PUBLIC_KEYS }}
+    steps:
+      - name: Require protected main dispatch and immutable source input
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SAFEAGENT_ALLOWED_EXTENSION_IDS" = khafofcbffjkkeeldejiplkfpdfckeol
+          test -n "$SAFEAGENT_AUTH_PUBLIC_KEYS"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify main ancestry and clean exact source before executing it
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          git cat-file -e "$SOURCE_SHA^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Validate internal distribution configuration using runtime parser
+        run: cargo run --locked --example validate-auth-config -- --internal-dev
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+      - name: Build unsigned Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/build-windows.ps1 -ExtensionIds $env:SAFEAGENT_ALLOWED_EXTENSION_IDS
+      - name: Build unsigned macOS installer
+        if: runner.os == 'macOS'
+        run: bash packaging/build-macos.sh '${{ matrix.arch }}' "$SAFEAGENT_ALLOWED_EXTENSION_IDS" --dev
+      - name: Smoke distribution binary (metadata and rejection only)
+        run: python packaging/smoke-native.py target/${{ matrix.target }}/release/safeagent
+      - name: Record provenance and checksums
+        run: python packaging/internal-dev-provenance.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: safeagent-UNSIGNED-DEV-${{ inputs.source_sha }}-${{ matrix.target }}
+          path: |
+            dist/*-UNSIGNED-DEV.exe
+            dist/*-UNSIGNED-DEV.pkg
+            dist/provenance.json
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-dev:
+    needs: package
+    if: ${{ inputs.publish_to_dev_gcs && vars.SAFEAGENT_DEV_GCS_PUBLICATION_ENABLED == 'true' }}
+    environment: safeagent-internal-dev-publishing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: safeagent-dev-publish-${{ inputs.source_sha }}
+      cancel-in-progress: false
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      SAFEAGENT_ALLOWED_EXTENSION_IDS: ${{ vars.SAFEAGENT_ALLOWED_EXTENSION_IDS }}
+      SAFEAGENT_AUTH_PUBLIC_KEYS: ${{ vars.SAFEAGENT_AUTH_PUBLIC_KEYS }}
+      SAFEAGENT_DEV_GCP_PROJECT_ID: ${{ vars.SAFEAGENT_DEV_GCP_PROJECT_ID }}
+      SAFEAGENT_DEV_GCS_BUCKET: ${{ vars.SAFEAGENT_DEV_GCS_BUCKET }}
+      SAFEAGENT_DEV_WIF_PROVIDER: ${{ vars.SAFEAGENT_DEV_WIF_PROVIDER }}
+      SAFEAGENT_DEV_UPLOAD_SERVICE_ACCOUNT: ${{ vars.SAFEAGENT_DEV_UPLOAD_SERVICE_ACCOUNT }}
+    steps:
+      - name: Require protected main and explicit infrastructure
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          test "$SAFEAGENT_ALLOWED_EXTENSION_IDS" = khafofcbffjkkeeldejiplkfpdfckeol
+          test -n "$SAFEAGENT_AUTH_PUBLIC_KEYS"
+          test -n "$SAFEAGENT_DEV_GCP_PROJECT_ID"
+          test -n "$SAFEAGENT_DEV_GCS_BUCKET"
+          test -n "$SAFEAGENT_DEV_WIF_PROVIDER"
+          test -n "$SAFEAGENT_DEV_UPLOAD_SERVICE_ACCOUNT"
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify reviewed source before executing validators
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$SOURCE_SHA^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
+          git checkout --detach "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Validate approved public configuration
+        run: cargo run --locked --example validate-auth-config -- --internal-dev
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: safeagent-UNSIGNED-DEV-${{ inputs.source_sha }}-*
+          path: ${{ runner.temp }}/safeagent-artifacts
+          merge-multiple: false
+      - name: Validate all three installers, provenance, checksums and generate catalog
+        run: >-
+          python3 -B packaging/internal-dev-catalog.py
+          --artifacts "$RUNNER_TEMP/safeagent-artifacts"
+          --catalog "$RUNNER_TEMP/safeagent-catalog.json"
+      - name: Install GCS client (no keys)
+        run: python3 -m pip install 'google-cloud-storage==3.1.0'
+      - name: Authenticate uploader via GitHub OIDC and WIF
+        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
+        with:
+          project_id: ${{ vars.SAFEAGENT_DEV_GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.SAFEAGENT_DEV_WIF_PROVIDER }}
+          service_account: ${{ vars.SAFEAGENT_DEV_UPLOAD_SERVICE_ACCOUNT }}
+          create_credentials_file: true
+          export_environment_variables: true
+      - name: Revalidate and create immutable private objects; catalog last
+        run: >-
+          python3 -B packaging/internal-dev-catalog.py
+          --artifacts "$RUNNER_TEMP/safeagent-artifacts"
+          --catalog "$RUNNER_TEMP/safeagent-catalog.json"
+          --publish
