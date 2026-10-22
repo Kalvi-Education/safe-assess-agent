@@ -1,0 +1,73 @@
+{
+  "test": "Actual Linux SafeAgent, hello then unauthorized check",
+  "replies": [
+    {
+      "protocolVersion": 2,
+      "requestId": "02683688-1f6c-45ae-9aaa-f416137ed540",
+      "challenge": "linux-test-hello",
+      "agentInstanceId": "b58GD6ITwwUfOb2nI5wblw",
+      "authChallenge": "1ogadWcvKwZULO4btic3L0gj54ePiuNGHujLCpMMJ7s",
+      "sessionId": null,
+      "preflightSupport": {
+        "contractVersion": 1,
+        "grantVersion": 3
+      },
+      "ok": true,
+      "agentVersion": "0.2.0",
+      "authState": "unauthorized",
+      "authReadiness": "AUTH_CONFIG_INVALID",
+      "authorizedCapabilities": [],
+      "expiresAt": null,
+      "capabilities": {
+        "processes": {
+          "status": "unsupported",
+          "limitation": "Visible process names only; exact catalog matches are not verified identities or evidence of active use. Hidden, renamed, inaccessible and browser-hosted applications may be missed. No executable paths, arguments, PIDs or full process inventory are returned."
+        },
+        "displays": {
+          "status": "unsupported",
+          "limitation": "Active logical displays only; mirrors, virtual displays and physical monitors cannot be reliably distinguished. A single display does not exclude external capture."
+        },
+        "overlays": {
+          "status": "unsupported",
+          "limitation": "Visible window metadata only, not proof of assistance or capture exclusion. System UI and legitimate utilities can match; hidden windows, other desktops and inaccessible metadata may be missed. No titles, owners, PIDs or images are returned. macOS sharing state does not establish modern capture behavior; Windows capture affinity is not inspected."
+        }
+      },
+      "findings": [],
+      "observedAt": 1792662705209
+    },
+    {
+      "protocolVersion": 2,
+      "requestId": "97f5c65a-ae24-45cf-bf54-05e9ee817898",
+      "challenge": "linux-test-check",
+      "agentInstanceId": null,
+      "authChallenge": null,
+      "sessionId": null,
+      "ok": false,
+      "agentVersion": "0.2.0",
+      "authState": "unauthorized",
+      "authReadiness": null,
+      "authorizedCapabilities": [],
+      "expiresAt": null,
+      "capabilities": {
+        "processes": {
+          "status": "unsupported",
+          "limitation": "Visible process names only; exact catalog matches are not verified identities or evidence of active use. Hidden, renamed, inaccessible and browser-hosted applications may be missed. No executable paths, arguments, PIDs or full process inventory are returned."
+        },
+        "displays": {
+          "status": "unsupported",
+          "limitation": "Active logical displays only; mirrors, virtual displays and physical monitors cannot be reliably distinguished. A single display does not exclude external capture."
+        },
+        "overlays": {
+          "status": "unsupported",
+          "limitation": "Visible window metadata only, not proof of assistance or capture exclusion. System UI and legitimate utilities can match; hidden windows, other desktops and inaccessible metadata may be missed. No titles, owners, PIDs or images are returned. macOS sharing state does not establish modern capture behavior; Windows capture affinity is not inspected."
+        }
+      },
+      "findings": [],
+      "observedAt": 1792662705211,
+      "error": {
+        "code": "UNAUTHORIZED",
+        "message": "A current authorization is required."
+      }
+    }
+  ]
+}

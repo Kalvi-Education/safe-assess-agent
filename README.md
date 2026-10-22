@@ -31,6 +31,7 @@ not become clean scans or automatic penalties.
 | Document | Canonical purpose |
 | --- | --- |
 | [Protocol](protocol.md) | Implemented commands, signed grants, replies, probe limitations and trust boundary |
+| [Architecture, security & validation](docs/native-messaging-architecture-security.md) | Twenty-question technical review, browser evidence, Linux feasibility and unvalidated release gates |
 | [Design](design.md) | Component ownership and cross-PR integration requirements, not deployment certification |
 | [Requirements](requirements.md) | Product scope, privacy constraints and acceptance cases |
 | [Checklist](tasks.md) | Implemented native boundaries and remaining integration/device/release gates |

@@ -1,0 +1,15 @@
+{
+  "missingHost": {
+    "test": "Missing SafeAgent host",
+    "nativeMessagingAPI": "function",
+    "result": "Specified native messaging host not found.",
+    "extensionId": "fliopkdfgfkhcnimggjmfokhmfmoecgc",
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/155.0.0.0 Safari/537.36"
+  },
+  "deniedOrigin": {
+    "test": "Origin denial fixture (not SafeAgent binary)",
+    "result": "Access to the specified native messaging host is forbidden.",
+    "extensionId": "fliopkdfgfkhcnimggjmfokhmfmoecgc"
+  },
+  "scope": "Isolated synthetic extension; browser enforcement only; actual SafeAgent binary not exercised"
+}
