@@ -207,6 +207,36 @@ fn matching_groups_helpers_and_avoids_substring_false_positives() {
 }
 
 #[test]
+fn reports_hotkey_clipboard_and_ai_overlay_tools_by_exact_name() {
+    let findings = probes::group_applications([
+        "Raycast",
+        "Maccy",
+        "AutoHotkey64.exe",
+        "Final Round AI",
+        "Perplexity Helper",
+        "raycastnotes",
+        "pastebin",
+    ]);
+    let ids: Vec<&str> = findings.iter().map(|finding| finding.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "application:final-round-ai",
+            "application:perplexity",
+            "application:raycast",
+            "application:autohotkey",
+            "application:maccy",
+        ]
+    );
+    let raycast = findings
+        .iter()
+        .find(|f| f.id == "application:raycast")
+        .unwrap();
+    assert_eq!(raycast.category, "editor");
+    assert_eq!(raycast.label, "Raycast");
+}
+
+#[test]
 fn origin_allowlist_is_strict_and_fail_closed() {
     let id = "abcdefghijklmnopabcdefghijklmnop";
     let origin = format!("chrome-extension://{id}/");
