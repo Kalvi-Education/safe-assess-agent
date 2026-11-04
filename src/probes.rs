@@ -118,6 +118,25 @@ const APPLICATIONS: &[(&str, &str, &str, &[&str])] = &[
     ),
     ("ollama", "ai-assistant", "Ollama", &["ollama"]),
     (
+        "final-round-ai",
+        "ai-assistant",
+        "Final Round AI",
+        &["final round ai", "finalroundai"],
+    ),
+    (
+        "lockedin-ai",
+        "ai-assistant",
+        "LockedIn AI",
+        &["lockedin ai", "lockedinai"],
+    ),
+    (
+        "perplexity",
+        "ai-assistant",
+        "Perplexity",
+        &["perplexity", "perplexity helper"],
+    ),
+    ("copilot", "ai-assistant", "Microsoft Copilot", &["copilot"]),
+    (
         "lm-studio",
         "ai-assistant",
         "LM Studio",
@@ -157,6 +176,38 @@ const APPLICATIONS: &[(&str, &str, &str, &[&str])] = &[
         &["code", "code helper", "code helper (renderer)"],
     ),
     ("sublime", "editor", "Sublime Text", &["sublime_text"]),
+    // Assistive tools that register global hotkeys or keep clipboard history.
+    // Reported as "editor" so existing HIBU/backend category contracts accept them.
+    ("raycast", "editor", "Raycast", &["raycast"]),
+    ("alfred", "editor", "Alfred", &["alfred"]),
+    (
+        "keyboard-maestro",
+        "editor",
+        "Keyboard Maestro",
+        &["keyboard maestro", "keyboard maestro engine"],
+    ),
+    (
+        "bettertouchtool",
+        "editor",
+        "BetterTouchTool",
+        &["bettertouchtool"],
+    ),
+    (
+        "autohotkey",
+        "editor",
+        "AutoHotkey",
+        &["autohotkey", "autohotkey64", "autohotkeyu64"],
+    ),
+    (
+        "powertoys",
+        "editor",
+        "PowerToys",
+        &["powertoys", "powertoys.run"],
+    ),
+    ("maccy", "editor", "Maccy", &["maccy"]),
+    ("paste", "editor", "Paste", &["paste"]),
+    ("ditto", "editor", "Ditto", &["ditto"]),
+    ("copyq", "editor", "CopyQ", &["copyq"]),
 ];
 
 pub fn group_applications<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<Finding> {
