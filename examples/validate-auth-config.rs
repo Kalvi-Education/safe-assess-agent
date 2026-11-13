@@ -1,4 +1,4 @@
-const DEV_EXTENSION_ID: &str = "khafofcbffjkkeeldejiplkfpdfckeol";
+const DEV_EXTENSION_ID: &str = "lfmldljfbheedcddndbnfckfkhjmkekp";
 
 fn validate(config: &str, ids: &str, internal_dev: bool) -> Result<(), &'static str> {
     safeagent::auth::validate_key_config(config)?;
@@ -35,7 +35,7 @@ mod tests {
         for ids in [
             "",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "khafofcbffjkkeeldejiplkfpdfckeol,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lfmldljfbheedcddndbnfckfkhjmkekp,aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         ] {
             assert!(validate(&config, ids, true).is_err());
         }

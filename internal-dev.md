@@ -28,7 +28,7 @@ None of these workflows installs a host or enables assessment enforcement.
 2. Pre-create `safeagent-internal-dev`, restrict deployment branches to main,
    restrict dispatch/environment administration to trusted maintainers and set
    these environment **variables**, not secrets:
-   - `SAFEAGENT_ALLOWED_EXTENSION_IDS=khafofcbffjkkeeldejiplkfpdfckeol`
+   - `SAFEAGENT_ALLOWED_EXTENSION_IDS=lfmldljfbheedcddndbnfckfkhjmkekp`
    - `SAFEAGENT_AUTH_PUBLIC_KEYS`: approved Dev `keyId:base64urlPublicKey` ring
      in the format in `.env.example`. Confirm its matching signer with the
      backend owner. Only public keys enter the native build. No fixture fallback.
@@ -120,7 +120,7 @@ before environment vars are loaded):
 | `SAFEAGENT_DEV_GCS_BUCKET` | Bare dedicated private bucket name, e.g. `PROJECT-safeagent-dev`; no `gs://`, path, dots or URL |
 | `SAFEAGENT_DEV_WIF_PROVIDER` | `projects/PROJECT_NUMBER/locations/global/workloadIdentityPools/safeagent-dev-github/providers/github` |
 | `SAFEAGENT_DEV_UPLOAD_SERVICE_ACCOUNT` | `safeagent-dev-uploader@PROJECT_ID.iam.gserviceaccount.com` |
-| `SAFEAGENT_ALLOWED_EXTENSION_IDS` | Exactly `khafofcbffjkkeeldejiplkfpdfckeol`, same as packaging environment |
+| `SAFEAGENT_ALLOWED_EXTENSION_IDS` | Exactly `lfmldljfbheedcddndbnfckfkhjmkekp`, same as packaging environment |
 | `SAFEAGENT_AUTH_PUBLIC_KEYS` | Exactly the approved Dev ring in packaging environment, including order/encoding. Runtime parser validates Ed25519 keys; publication matches IDs AND SHA-256 of exact ring, not merely key names. |
 
 No private Ed25519 keys in Actions. The matching Dev grant signer remains with
@@ -396,7 +396,7 @@ export GITHUB_SHA='FULL_40_CHARACTER_WORKFLOW_SHA'
 export GITHUB_RUN_ID='NUMERIC_RUN_ID'
 export GITHUB_RUN_ATTEMPT='NUMERIC_RUN_ATTEMPT'
 export SAFEAGENT_AUTH_PUBLIC_KEYS='APPROVED_KEY_ID:APPROVED_BASE64URL_PUBLIC_KEY'
-export SAFEAGENT_ALLOWED_EXTENSION_IDS='khafofcbffjkkeeldejiplkfpdfckeol'
+export SAFEAGENT_ALLOWED_EXTENSION_IDS='lfmldljfbheedcddndbnfckfkhjmkekp'
 cargo run --locked --example validate-auth-config -- --internal-dev
 python3 -B packaging/internal-dev-catalog.py --artifacts /path/to/artifacts \
   --catalog /path/outside-artifacts/catalog.json

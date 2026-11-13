@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 
-DEV_ID = "khafofcbffjkkeeldejiplkfpdfckeol"
+DEV_ID = "lfmldljfbheedcddndbnfckfkhjmkekp"
 TARGETS = {
     "x86_64-pc-windows-msvc": "windows-x64-UNSIGNED-DEV.exe",
     "aarch64-apple-darwin": "macos-arm64-UNSIGNED-DEV.pkg",

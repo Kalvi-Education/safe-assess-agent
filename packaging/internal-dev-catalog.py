@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import re
 
-DEV_ID = "khafofcbffjkkeeldejiplkfpdfckeol"
+DEV_ID = "lfmldljfbheedcddndbnfckfkhjmkekp"
 VERSION = "0.2.0"
 TARGETS = {
     "x86_64-pc-windows-msvc": ("windows", "x64", "exe"),
