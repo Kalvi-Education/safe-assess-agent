@@ -44,7 +44,7 @@ jobs:
           test "$GITHUB_REF" = refs/heads/main
           test "$GITHUB_REF_PROTECTED" = true
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$SAFEAGENT_ALLOWED_EXTENSION_IDS" = khafofcbffjkkeeldejiplkfpdfckeol
+          test "$SAFEAGENT_ALLOWED_EXTENSION_IDS" = lfmldljfbheedcddndbnfckfkhjmkekp
           test -n "$SAFEAGENT_AUTH_PUBLIC_KEYS"
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -115,7 +115,7 @@ jobs:
           test "$GITHUB_REF" = refs/heads/main
           test "$GITHUB_REF_PROTECTED" = true
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$SAFEAGENT_ALLOWED_EXTENSION_IDS" = khafofcbffjkkeeldejiplkfpdfckeol
+          test "$SAFEAGENT_ALLOWED_EXTENSION_IDS" = lfmldljfbheedcddndbnfckfkhjmkekp
           test -n "$SAFEAGENT_AUTH_PUBLIC_KEYS"
           test -n "$SAFEAGENT_DEV_GCP_PROJECT_ID"
           test -n "$SAFEAGENT_DEV_GCS_BUCKET"
