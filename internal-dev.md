@@ -1,4 +1,4 @@
-# Internal Dev distribution — 0.2.0
+# Internal Dev distribution — 0.2.x
 
 Developer-only, manually initiated testing on explicitly approved machines. This
 is not a student release, production approval, OS compatibility certification,
@@ -124,7 +124,7 @@ before environment vars are loaded):
 | `SAFEAGENT_AUTH_PUBLIC_KEYS` | Exactly the approved Dev ring in packaging environment, including order/encoding. Runtime parser validates Ed25519 keys; publication matches IDs AND SHA-256 of exact ring, not merely key names. |
 
 No private Ed25519 keys in Actions. The matching Dev grant signer remains with
-the backend owner. The expected version is explicitly 0.2.0; future versions
+the backend owner. The expected version is the 0.2.x patch in Cargo.toml (bump it for every published build so HIBu can ask students to update); future versions
 require code review, not arbitrary dispatch input. `.env.example` documents all
 flags/variables; Cargo and Actions do not automatically load that file.
 
@@ -170,7 +170,7 @@ gcloud iam service-accounts add-iam-policy-binding "$UPLOADER" \
   --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL/attribute.repository_id/$REPO_ID"
 gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
   --member="serviceAccount:$UPLOADER" --role=roles/storage.objectCreator \
-  --condition="expression=resource.name.startsWith('projects/_/buckets/$BUCKET/objects/internal-dev/0.2.0/'),title=safeagent-dev-create-only"
+  --condition="expression=resource.name.startsWith('projects/_/buckets/$BUCKET/objects/internal-dev/'),title=safeagent-dev-create-only"
 ```
 
 The provider condition assumes GitHub's default environment `sub`; if the org
@@ -199,7 +199,7 @@ gcloud iam roles create safeagentDevObjectReader --project="$PROJECT_ID" \
 for SA in "$BACKEND_READER" "$URL_SIGNER"; do
   gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" \
     --member="serviceAccount:$SA" --role="projects/$PROJECT_ID/roles/safeagentDevObjectReader" \
-    --condition="expression=resource.name.startsWith('projects/_/buckets/$BUCKET/objects/internal-dev/0.2.0/'),title=safeagent-dev-read-only"
+    --condition="expression=resource.name.startsWith('projects/_/buckets/$BUCKET/objects/internal-dev/'),title=safeagent-dev-read-only"
 done
 gcloud iam service-accounts add-iam-policy-binding "$URL_SIGNER" \
   --project="$PROJECT_ID" --member="serviceAccount:$BACKEND_READER" \
@@ -236,10 +236,10 @@ orphan cleanup procedures before pilot use.
    all jobs have `contents: read`, none has repository write permission. It
    revalidates before uploading. Generated catalog has no URLs/credentials.
 4. Immutable objects are:
-   `internal-dev/0.2.0/<40-char-source-commit>/<rust-target>/<installer-name>`,
+   `internal-dev/<version>/<40-char-source-commit>/<rust-target>/<installer-name>`,
    plus that target's `provenance.json` and `SHA256SUMS` (nine objects total).
-   The tenth/final object is `internal-dev/0.2.0/<commit>/catalog.json`.
-   Names are `safeagent-0.2.0-windows-x64-UNSIGNED-DEV.exe`,
+   The tenth/final object is `internal-dev/<version>/<commit>/catalog.json`.
+   Names are `safeagent-<version>-windows-x64-UNSIGNED-DEV.exe`,
    `safeagent-0.2.0-macos-arm64-UNSIGNED-DEV.pkg`, and
    `safeagent-0.2.0-macos-x64-UNSIGNED-DEV.pkg`. No `latest` alias is written.
 5. The schemaVersion 1 catalog records version/source/workflow/run, wire protocol
