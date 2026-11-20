@@ -20,12 +20,12 @@ class ProvenanceTests(unittest.TestCase):
                 try:
                     os.chdir(directory)
                     Path("dist").mkdir()
-                    artifact = Path("dist") / f"safeagent-0.2.0-{suffix}"
+                    artifact = Path("dist") / f"safeagent-0.2.1-{suffix}"
                     artifact.write_bytes(b"installer-test-placeholder")
                     env = {"SOURCE_SHA": "a" * 40, "TARGET": target,
                            "SAFEAGENT_AUTH_PUBLIC_KEYS": "approved-id:PUBLIC_VALUE",
                            "GITHUB_SHA": "b" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}
-                    metadata = json.dumps({"packages": [{"name": "safeagent", "version": "0.2.0"}]})
+                    metadata = json.dumps({"packages": [{"name": "safeagent", "version": "0.2.1"}]})
                     with patch.dict(os.environ, env), patch.object(provenance, "command", side_effect=["a" * 40, "", metadata]), patch.object(provenance.subprocess, "run") as run:
                         provenance.main()
                         self.assertIn("--internal-dev", run.call_args_list[1].args[0])

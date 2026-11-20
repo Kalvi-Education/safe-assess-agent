@@ -29,8 +29,9 @@ def main():
     subprocess.run(["cargo", "run", "--locked", "--example", "validate-auth-config", "--", "--internal-dev"], check=True)
     metadata = json.loads(command("cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"))
     version = next(p["version"] for p in metadata["packages"] if p["name"] == "safeagent")
-    if version != "0.2.0":
-        raise ValueError("Internal Dev pilot requires agent version 0.2.0")
+    # Each published build carries its own patch version so HIBu can tell students to update.
+    if not re.fullmatch(r"0\.2\.[0-9]+", version):
+        raise ValueError("Internal Dev pilot requires a 0.2.x agent version")
     dist = Path("dist")
     installer = dist / f"safeagent-{version}-{TARGETS[target]}"
     if not installer.is_file():

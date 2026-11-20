@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
-if pgrep -x safeagent >/dev/null || pgrep -x 'Google Chrome' >/dev/null; then
-  echo 'Finish all assessments and close Chrome and SafeAgent for every user before installing or repairing.' >&2
+# Chrome starts SafeAgent fresh for every check and reads the host manifest each time, so the
+# install takes effect without restarting Chrome. Only a check running right now must finish
+# first, so its binary is not replaced mid-run.
+if pgrep -x safeagent >/dev/null; then
+  echo 'A SafeAgent check is running. Wait a few seconds for it to finish, then run the installer again.' >&2
   exit 1
 fi

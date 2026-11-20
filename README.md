@@ -12,7 +12,7 @@ not become clean scans or automatic penalties.
 
 ## Current scope
 
-- Version **0.2.0**, wire protocol **2**. Monitoring requires a signed v2 grant
+- Version **0.2.x** (patch bumped per published build), wire protocol **2**. Monitoring requires a signed v2 grant
   on the same native port; advisory one-shot preflight uses a separate signed
   v3 grant. Legacy v1 and unauthenticated observations are rejected.
 - `hello` is metadata-only. `ok: true` does not establish readiness;

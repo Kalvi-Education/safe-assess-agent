@@ -35,13 +35,13 @@ class CatalogTests(unittest.TestCase):
             "SOURCE_SHA": SOURCE, "GITHUB_SHA": WORKFLOW, "GITHUB_RUN_ID": "123",
             "GITHUB_RUN_ATTEMPT": "1", "SAFEAGENT_AUTH_PUBLIC_KEYS": RING,
         }
-        metadata = json.dumps({"packages": [{"name": "safeagent", "version": "0.2.0"}]})
+        metadata = json.dumps({"packages": [{"name": "safeagent", "version": "0.2.1"}]})
         for target, suffix in provenance.TARGETS.items():
             folder = self.root / f"safeagent-UNSIGNED-DEV-{SOURCE}-{target}"
             folder.mkdir()
             dist = folder / "dist"
             dist.mkdir()
-            (dist / f"safeagent-0.2.0-{suffix}").write_bytes(target.encode())
+            (dist / f"safeagent-0.2.1-{suffix}").write_bytes(target.encode())
             previous = Path.cwd()
             try:
                 os.chdir(folder)
@@ -76,7 +76,7 @@ class CatalogTests(unittest.TestCase):
         uploads = self.validate()
         self.assertEqual(len(uploads), 10)
         name, data = uploads[-1]
-        self.assertEqual(name, f"internal-dev/0.2.0/{SOURCE}/catalog.json")
+        self.assertEqual(name, f"internal-dev/0.2.1/{SOURCE}/catalog.json")
         record = json.loads(data)
         self.assertEqual(record["extensionId"], catalog.DEV_ID)
         self.assertEqual(record["wireProtocolVersion"], 2)
