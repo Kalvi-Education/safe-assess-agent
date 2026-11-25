@@ -96,8 +96,8 @@ jobs:
         with:
           name: safeagent-signed-${{ runner.os }}-${{ matrix.arch }}
           path: |
-            dist/*-SIGNED.exe
-            dist/*-SIGNED-NOTARIZED.pkg
+            dist/*.exe
+            dist/*.pkg
           if-no-files-found: error
           retention-days: 30
   publish:
@@ -122,7 +122,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(release/*-SIGNED.exe release/*-SIGNED-NOTARIZED.pkg)
+          files=(release/*.exe release/*.pkg)
           test "${#files[@]}" -eq 3
           sha256sum "${files[@]}" > release/SHA256SUMS
           gh release create "$RELEASE_TAG" "${files[@]}" release/SHA256SUMS --verify-tag --title "SafeAgent ${RELEASE_TAG#safeagent-}" --notes 'Signed native installers. Install, repair, upgrade, rollback, or uninstall only outside active assessments. Local observations are not trusted attestation.'

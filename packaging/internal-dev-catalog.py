@@ -70,7 +70,7 @@ def validate(root, source, workflow, run_id, attempt, key_ring):
     for target, (platform, arch, extension) in TARGETS.items():
         directory = root / f"safeagent-UNSIGNED-DEV-{source}-{target}"
         require(directory.is_dir() and not directory.is_symlink(), "Invalid artifact directory")
-        filename = f"safeagent-{VERSION}-{platform}-{arch}-UNSIGNED-DEV.{extension}"
+        filename = f"safeagent-{VERSION}-{platform}-{arch}.{extension}"
         names = {filename, "provenance.json", "SHA256SUMS"}
         require({p.name for p in directory.iterdir()} == names, "Unexpected or missing artifact files")
         files = {}

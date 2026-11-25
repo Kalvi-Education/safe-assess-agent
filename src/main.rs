@@ -53,9 +53,48 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Append one line per launch outcome. Chrome discards stderr, so this is the only trace a
+/// student or support can read. Codes only: no origins, findings, paths or user data.
+fn log_outcome(outcome: &str) {
+    use std::fs::OpenOptions;
+    let dir = if cfg!(target_os = "windows") {
+        std::env::var_os("LOCALAPPDATA")
+            .map(|base| std::path::PathBuf::from(base).join("Kalvium/SafeAgent"))
+    } else {
+        std::env::var_os("HOME")
+            .map(|home| std::path::PathBuf::from(home).join("Library/Logs/Kalvium"))
+    };
+    let Some(dir) = dir else { return };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = dir.join("safeagent.log");
+    // Keep the log bounded; one rotation is enough for support.
+    if std::fs::metadata(&path).is_ok_and(|meta| meta.len() > 256 * 1024) {
+        let _ = std::fs::rename(&path, dir.join("safeagent.log.1"));
+    }
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{seconds} v{} {outcome}", safeagent::VERSION);
+    }
+}
+
 fn main() {
-    if let Err(error) = run() {
-        eprintln!("safeagent: {error}");
-        std::process::exit(1);
+    match run() {
+        Ok(()) => log_outcome("exit ok"),
+        Err(error) => {
+            let code = if error.to_string().contains("allowlist") {
+                "origin_rejected"
+            } else if error.to_string().starts_with("Usage") {
+                "bad_arguments"
+            } else {
+                "error"
+            };
+            log_outcome(&format!("exit {code}"));
+            eprintln!("safeagent: {error}");
+            std::process::exit(1);
+        }
     }
 }

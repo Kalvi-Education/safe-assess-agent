@@ -34,7 +34,6 @@ chmod 755 "$payload$install_dir/safeagent"
 /usr/bin/python3 "$root/packaging/write-manifest.py" "$ids" "$install_dir/safeagent" "$payload$manifest_dir/com.kalvium.safeagent.json"
 cp "$root/packaging/uninstall-macos.sh" "$payload$install_dir/uninstall.sh"
 chmod 755 "$payload$install_dir/uninstall.sh"
-artifact_mode=UNSIGNED-DEV
 if [[ "$mode" == --release ]]; then
   : "${MACOS_SIGNING_IDENTITY:?Developer ID Application identity required}"
   : "${MACOS_INSTALLER_IDENTITY:?Developer ID Installer identity required}"
@@ -43,13 +42,12 @@ if [[ "$mode" == --release ]]; then
   : "${APPLE_API_ISSUER_ID:?App Store Connect issuer ID required}"
   codesign --force --options runtime --timestamp --sign "$MACOS_SIGNING_IDENTITY" "$payload$install_dir/safeagent"
   codesign --verify --strict --verbose=2 "$payload$install_dir/safeagent"
-  artifact_mode=SIGNED-NOTARIZED
 fi
 pkgbuild --root "$payload" --scripts "$root/packaging/macos-scripts" --identifier com.kalvium.safeagent --version "$version" --install-location / "$work/component.pkg"
 productbuild --synthesize --package "$work/component.pkg" "$work/distribution.xml"
 /usr/bin/python3 "$root/packaging/configure-distribution.py" "$work/distribution.xml" "$arch"
 cp "$root/packaging/installer-readme.txt" "$work/installer-readme.txt"
-artifact="$root/dist/safeagent-$version-macos-$arch-$artifact_mode.pkg"
+artifact="$root/dist/safeagent-$version-macos-$arch.pkg"
 if [[ "$mode" == --release ]]; then
   productbuild --distribution "$work/distribution.xml" --resources "$work" --package-path "$work" --sign "$MACOS_INSTALLER_IDENTITY" "$artifact"
   pkgutil --check-signature "$artifact"

@@ -146,7 +146,7 @@ Environment **secrets**:
 Missing/invalid credentials fail closed. Windows signs and verifies the binary **and** installer with SHA-256 timestamping; macOS signs with hardened runtime, signs the installer, waits for an **Accepted** notarization result, staples, validates the ticket and assesses Gatekeeper before upload. There is no skip-signing switch in the release workflow. Temporary credentials are removed in cleanup; use ephemeral GitHub-hosted runners only. Do not enable shell tracing around signing steps. Signing/notarization contact their external services; the **agent runtime** does not.
 
 Production extension identity must be finalized before building. CI's test-only
-`UNSIGNED-DEV` artifacts cannot substitute for a production release. Blank inputs
+Unsigned development artifacts (see `signatureStatus`) cannot substitute for a production release. Blank inputs
 in [.env.example](.env.example) are discovery placeholders, not credentials;
 GitHub vars/secrets must be provisioned explicitly, not loaded from dotenv.
 

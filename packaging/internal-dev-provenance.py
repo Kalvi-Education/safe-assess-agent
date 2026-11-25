@@ -8,9 +8,9 @@ import subprocess
 
 DEV_ID = "lfmldljfbheedcddndbnfckfkhjmkekp"
 TARGETS = {
-    "x86_64-pc-windows-msvc": "windows-x64-UNSIGNED-DEV.exe",
-    "aarch64-apple-darwin": "macos-arm64-UNSIGNED-DEV.pkg",
-    "x86_64-apple-darwin": "macos-x64-UNSIGNED-DEV.pkg",
+    "x86_64-pc-windows-msvc": "windows-x64.exe",
+    "aarch64-apple-darwin": "macos-arm64.pkg",
+    "x86_64-apple-darwin": "macos-x64.pkg",
 }
 
 

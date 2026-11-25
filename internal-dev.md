@@ -42,7 +42,7 @@ None of these workflows installs a host or enables assessment enforcement.
    Ordinary local `--dev` builders still permit keyless diagnostic/rejection
    builds; **functional pilot distribution requires compiled approved keys**.
 4. Download only the matching SHA/target Actions artifact from the successful
-   run: Windows x64, macOS arm64 or macOS x64. Each contains one `UNSIGNED-DEV`
+   run: Windows x64, macOS arm64 or macOS x64. Each contains one unsigned development
    installer, `provenance.json`, and `SHA256SUMS` for installer and provenance.
    Verify checksums and source/target/identity/key IDs before use. Provenance is
    a build record, not a cryptographic attestation or approval. It contains no
@@ -71,7 +71,7 @@ None of these workflows installs a host or enables assessment enforcement.
 - Windows uses the fixed `%LOCALAPPDATA%\Kalvium\SafeAgent` directory, no
   elevation, service or destination selection. `/DIR` overrides are rejected;
   previous non-default registration blocks installation before payload changes.
-  Have authorized IT inspect and uninstall the prior custom installation first;
+  Uninstall the prior custom installation first (Windows Settings > Apps);
   never blindly move/delete its directory or registry entry. Inventory prior
   custom installs even if registration is missing. macOS uses the documented
   system-wide paths and its normal manual administrator installation flow.
@@ -239,9 +239,10 @@ orphan cleanup procedures before pilot use.
    `internal-dev/<version>/<40-char-source-commit>/<rust-target>/<installer-name>`,
    plus that target's `provenance.json` and `SHA256SUMS` (nine objects total).
    The tenth/final object is `internal-dev/<version>/<commit>/catalog.json`.
-   Names are `safeagent-<version>-windows-x64-UNSIGNED-DEV.exe`,
-   `safeagent-0.2.0-macos-arm64-UNSIGNED-DEV.pkg`, and
-   `safeagent-0.2.0-macos-x64-UNSIGNED-DEV.pkg`. No `latest` alias is written.
+   Names are `safeagent-<version>-windows-x64.exe`,
+   `safeagent-<version>-macos-arm64.pkg`, and
+   `safeagent-<version>-macos-x64.pkg`; signing status is recorded in
+   `provenance.json` and the catalog, not in the file name. No `latest` alias is written.
 5. The schemaVersion 1 catalog records version/source/workflow/run, wire protocol
    2, preflight grant 3/support, development-only unsigned/unnotarized status,
    exact extension ID, key IDs/fingerprint and each target's OS/arch, expected
@@ -352,7 +353,7 @@ bash packaging/build-macos.sh arm64 "$SAFEAGENT_ALLOWED_EXTENSION_IDS" --dev
 bash packaging/build-macos.sh x64 "$SAFEAGENT_ALLOWED_EXTENSION_IDS" --dev
 ```
 
-Output is `dist/*-UNSIGNED-DEV.exe` or `dist/*-UNSIGNED-DEV.pkg`. Local builds do
+Output is `dist/safeagent-<version>-<platform>-<arch>.exe` or `.pkg`. Local builds do
 not create the reviewed-main Actions provenance/catalog or approved distribution.
 Never rename them as signed packages or bypass Gatekeeper/SmartScreen to install.
 Follow the [authorized device procedure](#authorized-manual-device-test-and-cleanup).
