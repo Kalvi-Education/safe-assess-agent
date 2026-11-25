@@ -95,7 +95,7 @@ fn embedded_key_authorizes_binary_and_runtime_override_is_ignored() {
             .unwrap(),
     );
     let hello = exchange(&mut host, "hello", None);
-    assert_eq!(hello["agentVersion"], "0.2.0");
+    assert_eq!(hello["agentVersion"], safeagent::VERSION);
     assert_eq!(hello["authReadiness"], "ready");
     assert_eq!(hello["ok"], true);
     let wall = SystemTime::now()

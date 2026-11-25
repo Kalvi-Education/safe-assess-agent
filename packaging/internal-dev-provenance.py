@@ -8,9 +8,9 @@ import subprocess
 
 DEV_ID = "lfmldljfbheedcddndbnfckfkhjmkekp"
 TARGETS = {
-    "x86_64-pc-windows-msvc": "windows-x64-UNSIGNED-DEV.exe",
-    "aarch64-apple-darwin": "macos-arm64-UNSIGNED-DEV.pkg",
-    "x86_64-apple-darwin": "macos-x64-UNSIGNED-DEV.pkg",
+    "x86_64-pc-windows-msvc": "windows-x64.exe",
+    "aarch64-apple-darwin": "macos-arm64.pkg",
+    "x86_64-apple-darwin": "macos-x64.pkg",
 }
 
 
@@ -29,8 +29,9 @@ def main():
     subprocess.run(["cargo", "run", "--locked", "--example", "validate-auth-config", "--", "--internal-dev"], check=True)
     metadata = json.loads(command("cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"))
     version = next(p["version"] for p in metadata["packages"] if p["name"] == "safeagent")
-    if version != "0.2.0":
-        raise ValueError("Internal Dev pilot requires agent version 0.2.0")
+    # Each published build carries its own patch version so HIBu can tell students to update.
+    if not re.fullmatch(r"0\.2\.[0-9]+", version):
+        raise ValueError("Internal Dev pilot requires a 0.2.x agent version")
     dist = Path("dist")
     installer = dist / f"safeagent-{version}-{TARGETS[target]}"
     if not installer.is_file():

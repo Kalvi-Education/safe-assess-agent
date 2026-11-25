@@ -1,12 +1,18 @@
 use crate::probes::{Capability, Finding, Status};
 
-pub const LIMITATION: &str = "Visible window metadata only, not proof of assistance or capture exclusion. System UI and legitimate utilities can match; hidden windows, other desktops and inaccessible metadata may be missed. No titles, owners, PIDs or images are returned. macOS sharing state does not establish modern capture behavior; Windows capture affinity is not inspected.";
+pub const LIMITATION: &str = "Visible window metadata only, not proof of assistance or capture exclusion. System UI and legitimate utilities can match; hidden windows, other desktops and inaccessible metadata may be missed. No titles, owners, PIDs or images are returned. macOS sharing state does not establish modern capture behavior. Windows capture affinity and non-activating style are read from window metadata only; hooks and hidden or other-desktop windows are not inspected.";
+
+const WS_EX_TOPMOST: u32 = 0x8;
+const WS_EX_TRANSPARENT: u32 = 0x20;
+const WS_EX_LAYERED: u32 = 0x80000;
+const WS_EX_NOACTIVATE: u32 = 0x0800_0000;
 
 #[derive(Default)]
 pub struct Observations {
     pub scanned: usize,
     pub elevated: usize,
     pub restricted: usize,
+    pub no_activate: usize,
     pub incomplete: bool,
 }
 
@@ -25,14 +31,28 @@ impl Observations {
         }
     }
 
-    pub fn windows_window(&mut self, visible: bool, style: Option<u32>) {
+    pub fn windows_window(&mut self, visible: bool, style: Option<u32>, affinity: Option<u32>) {
         if !visible {
             return;
         }
         self.scanned += 1;
         match style {
-            // WS_EX_TOPMOST combined with WS_EX_LAYERED or WS_EX_TRANSPARENT.
-            Some(style) if style & 0x8 != 0 && style & (0x80000 | 0x20) != 0 => self.elevated += 1,
+            Some(style) => {
+                let topmost = style & WS_EX_TOPMOST != 0;
+                if topmost && style & (WS_EX_LAYERED | WS_EX_TRANSPARENT) != 0 {
+                    self.elevated += 1;
+                }
+                // Typing into such a window never takes focus from the browser, so page
+                // blur/fullscreen events cannot see it.
+                if topmost && style & WS_EX_NOACTIVATE != 0 {
+                    self.no_activate += 1;
+                }
+            }
+            None => self.incomplete = true,
+        }
+        match affinity {
+            // WDA_MONITOR (1) or WDA_EXCLUDEFROMCAPTURE (0x11): hidden from screen capture/share.
+            Some(value) if value != 0 => self.restricted += 1,
             Some(_) => {}
             None => self.incomplete = true,
         }
@@ -70,8 +90,13 @@ pub fn apply(
         ),
         (
             "overlay:sharing-restricted",
-            "Windows reporting restricted sharing metadata",
+            "Windows hidden from screen capture",
             observations.restricted,
+        ),
+        (
+            "overlay:no-activate",
+            "Always-on-top windows that do not take focus",
+            observations.no_activate,
         ),
     ] {
         if count > 0 {
@@ -155,6 +180,7 @@ pub fn scan() -> Result<Observations, &'static str> {
         ) -> i32;
         fn IsWindowVisible(window: *mut c_void) -> i32;
         fn GetWindowLongW(window: *mut c_void, index: i32) -> i32;
+        fn GetWindowDisplayAffinity(window: *mut c_void, affinity: *mut u32) -> i32;
     }
     #[link(name = "kernel32")]
     extern "system" {
@@ -175,7 +201,13 @@ pub fn scan() -> Result<Observations, &'static str> {
         } else {
             Some(style as u32)
         };
-        unsafe { &mut *(data as *mut Observations) }.windows_window(true, style);
+        let mut affinity = 0u32;
+        let affinity = if unsafe { GetWindowDisplayAffinity(window, &mut affinity) } != 0 {
+            Some(affinity)
+        } else {
+            None
+        };
+        unsafe { &mut *(data as *mut Observations) }.windows_window(true, style, affinity);
         1
     }
     let mut observations = Observations::default();

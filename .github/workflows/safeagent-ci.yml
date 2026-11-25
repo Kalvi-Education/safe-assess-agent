@@ -52,7 +52,7 @@ jobs:
         with:
           name: safeagent-${{ runner.os }}-${{ matrix.arch }}-UNSIGNED-DEV
           path: |
-            dist/*UNSIGNED-DEV.exe
-            dist/*UNSIGNED-DEV.pkg
+            dist/*.exe
+            dist/*.pkg
           if-no-files-found: error
           retention-days: 14

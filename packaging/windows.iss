@@ -9,7 +9,7 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
-OutputBaseFilename=safeagent-{#AgentVersion}-windows-x64-{#ArtifactMode}
+OutputBaseFilename=safeagent-{#AgentVersion}-windows-x64
 UninstallDisplayName=Kalvium SafeAgent
 Compression=lzma2
 SolidCompression=yes
@@ -28,30 +28,42 @@ Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.kalvium.saf
 [UninstallDelete]
 Type: files; Name: "{app}\com.kalvium.safeagent.json"
 
+[Messages]
+FinishedLabel=SafeAgent is installed.%n%nGo back to your assessment setup page in Chrome and press Detect SafeAgent. You do not need to restart Chrome.
+
 [Code]
 var
   SafetyPage: TInputOptionWizardPage;
 
+// Chrome starts SafeAgent fresh for every check, so a first install is safe with Chrome open.
+// Only replacing an existing agent can interrupt a check that is running right now.
+function IsUpdate: Boolean;
+begin
+  Result := FileExists(ExpandConstant('{localappdata}\Kalvium\SafeAgent\safeagent.exe'));
+end;
+
 procedure InitializeWizard;
 begin
-  SafetyPage := CreateInputOptionPage(wpWelcome, 'Before installing or repairing',
-    'Never change SafeAgent during an assessment.',
-    'Finish or leave every active assessment and close Chrome before continuing.', True, False);
-  SafetyPage.Add('I have no active assessment and have closed Chrome.');
+  if IsUpdate then begin
+    SafetyPage := CreateInputOptionPage(wpWelcome, 'Before updating',
+      'Do not update SafeAgent during an assessment.',
+      'Finish or leave any assessment you are taking before continuing. Chrome can stay open.', True, False);
+    SafetyPage.Add('I am not taking an assessment right now.');
+  end;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if CurPageID = SafetyPage.ID then
+  if (SafetyPage <> nil) and (CurPageID = SafetyPage.ID) then
     Result := SafetyPage.Values[0];
 end;
 
 function InitializeSetup: Boolean;
 begin
   Result := True;
-  if WizardSilent then
-    Result := MsgBox('Confirm there is no active assessment and Chrome is closed before installing or repairing SafeAgent.', mbConfirmation, MB_YESNO) = IDYES;
+  if WizardSilent and IsUpdate then
+    Result := MsgBox('Confirm you are not taking an assessment before updating SafeAgent.', mbConfirmation, MB_YESNO) = IDYES;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -65,7 +77,7 @@ begin
   end;
   if RegQueryStringValue(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\com.kalvium.safeagent', '', RegisteredManifest) then
     if CompareText(RegisteredManifest, ExpandConstant('{app}\com.kalvium.safeagent.json')) <> 0 then
-      Result := 'Existing non-default SafeAgent registration found. Cancel and ask authorized IT to review and uninstall the old installation with Chrome closed before retrying. No files or registration have been moved.';
+      Result := 'An older copy of SafeAgent is installed in a different place. Open Windows Settings > Apps, uninstall Kalvium SafeAgent, then run this installer again. If that does not work, contact Kalvium support and mention code SA-REG.';
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -87,5 +99,5 @@ end;
 
 function InitializeUninstall: Boolean;
 begin
-  Result := MsgBox('Uninstall only outside an assessment. Confirm all assessments are finished and Chrome is closed.', mbConfirmation, MB_YESNO) = IDYES;
+  Result := MsgBox('Uninstall SafeAgent only when you are not taking an assessment. Continue?', mbConfirmation, MB_YESNO) = IDYES;
 end;

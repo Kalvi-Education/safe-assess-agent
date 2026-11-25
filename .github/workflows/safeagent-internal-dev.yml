@@ -80,8 +80,8 @@ jobs:
         with:
           name: safeagent-UNSIGNED-DEV-${{ inputs.source_sha }}-${{ matrix.target }}
           path: |
-            dist/*-UNSIGNED-DEV.exe
-            dist/*-UNSIGNED-DEV.pkg
+            dist/*.exe
+            dist/*.pkg
             dist/provenance.json
             dist/SHA256SUMS
           if-no-files-found: error

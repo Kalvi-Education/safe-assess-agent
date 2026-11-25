@@ -10,7 +10,8 @@ from pathlib import Path
 import re
 
 DEV_ID = "lfmldljfbheedcddndbnfckfkhjmkekp"
-VERSION = "0.2.0"
+# Taken from the built provenance so the catalog always names the version students install.
+VERSION_PATTERN = re.compile(r"0\.2\.[0-9]+")
 TARGETS = {
     "x86_64-pc-windows-msvc": ("windows", "x64", "exe"),
     "aarch64-apple-darwin": ("macos", "arm64", "pkg"),
@@ -37,6 +38,18 @@ def strict_json(data):
     return json.loads(data, object_pairs_hook=unique_pairs)
 
 
+def agent_version(root, source):
+    """The single version shared by every built target (from Cargo.toml via provenance)."""
+    versions = set()
+    for target in TARGETS:
+        record = strict_json((root / f"safeagent-UNSIGNED-DEV-{source}-{target}" / "provenance.json").read_bytes())
+        versions.add(record.get("agentVersion"))
+    require(len(versions) == 1, "All targets must share one agent version")
+    version = versions.pop()
+    require(isinstance(version, str) and VERSION_PATTERN.fullmatch(version), "Unsupported agent version")
+    return version
+
+
 def validate(root, source, workflow, run_id, attempt, key_ring):
     for value in (source, workflow):
         require(re.fullmatch(r"[0-9a-f]{40}", value), "Expected full lowercase commit SHA")
@@ -50,13 +63,14 @@ def validate(root, source, workflow, run_id, attempt, key_ring):
     expected_dirs = {f"safeagent-UNSIGNED-DEV-{source}-{t}" for t in TARGETS}
     require(root.is_dir() and not root.is_symlink(), "Invalid artifact root")
     require({p.name for p in root.iterdir()} == expected_dirs, "Require exactly all three artifacts")
+    VERSION = agent_version(root, source)
     prefix = f"internal-dev/{VERSION}/{source}"
     packages = []
     uploads = []
     for target, (platform, arch, extension) in TARGETS.items():
         directory = root / f"safeagent-UNSIGNED-DEV-{source}-{target}"
         require(directory.is_dir() and not directory.is_symlink(), "Invalid artifact directory")
-        filename = f"safeagent-{VERSION}-{platform}-{arch}-UNSIGNED-DEV.{extension}"
+        filename = f"safeagent-{VERSION}-{platform}-{arch}.{extension}"
         names = {filename, "provenance.json", "SHA256SUMS"}
         require({p.name for p in directory.iterdir()} == names, "Unexpected or missing artifact files")
         files = {}

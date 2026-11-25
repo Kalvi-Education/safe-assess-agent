@@ -25,7 +25,6 @@ try {
   # The installer substitutes its actual per-user installation directory.
   $template = '{"name":"com.kalvium.safeagent","description":"Kalvium SafeAgent (local observations, not attestation)","path":"@BINARY@","type":"stdio","allowed_origins":[' + $origins + ']}'
   Set-Content -Path "$out/host-template.json" -Value $template -Encoding ascii
-  $mode = 'UNSIGNED-DEV'
   if ($Release) {
     foreach ($key in @('WINDOWS_CERTIFICATE_BASE64','WINDOWS_CERTIFICATE_PASSWORD','WINDOWS_TIMESTAMP_URL')) {
       if (![Environment]::GetEnvironmentVariable($key)) { throw "Missing release secret: $key" }
@@ -34,7 +33,6 @@ try {
     if (!$signtool) { throw 'Windows SDK signtool required' }
     $cert = Join-Path $env:RUNNER_TEMP ('safeagent-' + [guid]::NewGuid() + '.pfx')
     [IO.File]::WriteAllBytes($cert, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_BASE64))
-    $mode = 'SIGNED'
     & $signtool.FullName sign /fd SHA256 /f $cert /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr $env:WINDOWS_TIMESTAMP_URL /td SHA256 $binary
     if ($LASTEXITCODE) { throw 'Binary signing failed' }
     & $signtool.FullName verify /pa /all $binary
@@ -42,10 +40,10 @@ try {
   }
   $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
   if (!(Test-Path $iscc)) { throw 'Inno Setup 6 is required to create the installer' }
-  & $iscc "/DAgentVersion=$version" "/DAgentBinary=$binary" "/DOutputDir=$out" "/DArtifactMode=$mode" "$PSScriptRoot/windows.iss"
+  & $iscc "/DAgentVersion=$version" "/DAgentBinary=$binary" "/DOutputDir=$out" "$PSScriptRoot/windows.iss"
   if ($LASTEXITCODE) { throw 'Installer creation failed' }
   if ($Release) {
-    $installer = "$out/safeagent-$version-windows-x64-$mode.exe"
+    $installer = "$out/safeagent-$version-windows-x64.exe"
     & $signtool.FullName sign /fd SHA256 /f $cert /p $env:WINDOWS_CERTIFICATE_PASSWORD /tr $env:WINDOWS_TIMESTAMP_URL /td SHA256 $installer
     if ($LASTEXITCODE) { throw 'Installer signing failed' }
     & $signtool.FullName verify /pa /all $installer

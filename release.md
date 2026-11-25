@@ -74,7 +74,7 @@ The following flow is an external acceptance target, not an installed end-to-end
 2. If compatible, obtain a Student-owned signed v3 preflight grant before one-shot observations. Do not start monitoring to obtain pre-admission authorization. Separately consented ongoing monitoring uses its own fresh port and v2 session grant. Transport success alone is not readiness.
 3. Classify failure and present a specific action using the table below. Do not collapse every connection failure into “missing or corrupted.”
 4. When installation or upgrade is appropriate, offer the approved, versioned Windows `.exe` or architecture-specific macOS `.pkg`, with publisher and required version information. Do not offer unsigned development artifacts or unvalidated Linux packages.
-5. Tell the student to finish/leave assessments, fully quit Chrome including background processes, run the installer, reopen Chrome and return to **Check connection**. macOS installation requires Chrome closed across users; closing windows alone is insufficient.
+5. Students install from the HIBu setup page before assessment day; Chrome can stay open (it launches SafeAgent per check and reads the host manifest each time). HIBu detects the agent automatically.
 6. Reconnect and repeat compatibility, authorization and capability checks. A download, installer exit or reported version alone does not admit the assessment.
 
 The prompt must not trap the student or prevent leaving the page. Current local/Dev
@@ -146,7 +146,7 @@ Environment **secrets**:
 Missing/invalid credentials fail closed. Windows signs and verifies the binary **and** installer with SHA-256 timestamping; macOS signs with hardened runtime, signs the installer, waits for an **Accepted** notarization result, staples, validates the ticket and assesses Gatekeeper before upload. There is no skip-signing switch in the release workflow. Temporary credentials are removed in cleanup; use ephemeral GitHub-hosted runners only. Do not enable shell tracing around signing steps. Signing/notarization contact their external services; the **agent runtime** does not.
 
 Production extension identity must be finalized before building. CI's test-only
-`UNSIGNED-DEV` artifacts cannot substitute for a production release. Blank inputs
+Unsigned development artifacts (see `signatureStatus`) cannot substitute for a production release. Blank inputs
 in [.env.example](.env.example) are discovery placeholders, not credentials;
 GitHub vars/secrets must be provisioned explicitly, not loaded from dotenv.
 
