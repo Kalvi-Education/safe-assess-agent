@@ -63,7 +63,7 @@ function InitializeSetup: Boolean;
 begin
   Result := True;
   if WizardSilent and IsUpdate then
-    Result := MsgBox('Confirm you are not taking an assessment before updating SafeAgent.', mbConfirmation, MB_YESNO) = IDYES;
+    Result := SuppressibleMsgBox('Confirm you are not taking an assessment before updating SafeAgent.', mbConfirmation, MB_YESNO, IDYES) = IDYES;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -99,5 +99,5 @@ end;
 
 function InitializeUninstall: Boolean;
 begin
-  Result := MsgBox('Uninstall SafeAgent only when you are not taking an assessment. Continue?', mbConfirmation, MB_YESNO) = IDYES;
+  Result := SuppressibleMsgBox('Uninstall SafeAgent only when you are not taking an assessment. Continue?', mbConfirmation, MB_YESNO, IDYES) = IDYES;
 end;

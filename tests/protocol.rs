@@ -258,3 +258,44 @@ fn origin_allowlist_is_strict_and_fail_closed() {
         assert!(!origin_allowed(&origin, id));
     }
 }
+
+#[test]
+fn remote_observations_report_session_and_catalog_services_only() {
+    use safeagent::remote::{strongest, Observations, ServiceState, CATEGORY, SERVICES};
+    let mut services = vec![ServiceState::Absent; SERVICES.len()];
+    services[0] = ServiceState::Running;
+    services[1] = ServiceState::Installed;
+    services[2] = ServiceState::Unknown;
+    let observations = Observations {
+        remote_session: Some(true),
+        remote_control: Some(false),
+        services,
+    };
+    let ids: Vec<_> = observations
+        .findings()
+        .into_iter()
+        .map(|f| {
+            assert_eq!(f.category, CATEGORY);
+            assert!(f.process_count.is_none() && f.window_count.is_none());
+            f.id
+        })
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "remote:session",
+            "remote:service-running:anydesk",
+            "remote:service-installed:teamviewer",
+        ]
+    );
+    assert!(observations.incomplete());
+    assert!(Observations::default().findings().is_empty());
+    assert_eq!(
+        strongest(ServiceState::Unknown, ServiceState::Installed),
+        ServiceState::Installed
+    );
+    assert_eq!(
+        strongest(ServiceState::Absent, ServiceState::Unknown),
+        ServiceState::Unknown
+    );
+}

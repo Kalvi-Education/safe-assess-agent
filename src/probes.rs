@@ -36,7 +36,7 @@ pub struct Finding {
     pub window_count: Option<usize>,
 }
 
-const PROCESS_LIMITATION: &str = "Visible process names only; exact catalog matches are not verified identities or evidence of active use. Hidden, renamed, inaccessible and browser-hosted applications may be missed. No executable paths, arguments, PIDs or full process inventory are returned.";
+const PROCESS_LIMITATION: &str = "Visible process names plus fixed-name remote-access service lookups and the Windows remote-session flag; exact catalog matches are not verified identities or evidence of active use. Hidden, renamed, inaccessible and browser-hosted applications may be missed; services that cannot be queried are not reported. No executable paths, arguments, PIDs, service inventory or full process inventory are returned.";
 const DISPLAY_LIMITATION: &str = "Active logical displays only; mirrors, virtual displays and physical monitors cannot be reliably distinguished. A single display does not exclude external capture.";
 
 pub fn capabilities() -> Capabilities {
@@ -300,6 +300,9 @@ pub fn scan() -> (Capabilities, Vec<Finding>) {
                     .values()
                     .filter_map(|process| process.name().to_str()),
             );
+            // Unqueryable services stay unreported rather than failing the probe:
+            // per-service ACLs vary and must not turn honest machines into PROBE_FAILED.
+            findings.extend(crate::remote::scan().findings());
         }
         apply_display_result(&mut caps.displays, display_count(), &mut findings);
         crate::overlays::apply(crate::overlays::scan(), &mut caps.overlays, &mut findings);

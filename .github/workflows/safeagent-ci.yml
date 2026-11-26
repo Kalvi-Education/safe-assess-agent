@@ -37,6 +37,7 @@ jobs:
         run: |
           python -B packaging/test-internal-dev-provenance.py
           python -B packaging/test-internal-dev-catalog.py
+          python -B packaging/test-windows-installer.py
       - name: Test actual binary authorization with ephemeral keys
         run: cargo test --locked --test binary-authorization -- --ignored
       - name: Build Windows development installer
