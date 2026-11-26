@@ -194,6 +194,76 @@ create/issue/complete operations. No active monitoring session is required.
 Unavailable results must be visible and never block admission; local/dev is
 advisory only, with no enforcement in this implementation.
 
+## Result attestation (0.3.0, additive)
+
+Added fields only. Existing v2 fields, codes and grant payloads are unchanged, so HIBu and the
+backend keep working until they adopt these fields.
+
+### Device key
+
+- ECDSA P-256 / SHA-256. TPM and Secure Enclave keys are P-256 only.
+- Windows: CNG key `Kalvium SafeAgent Result Key`, per user, non-exportable. `Microsoft Platform
+  Crypto Provider` (TPM) first, then `Microsoft Software Key Storage Provider`.
+- macOS: Secure Enclave key tagged `com.kalvium.safeagent.result-key` in the data-protection
+  keychain, this device only. Needs a Developer ID signed build; unsigned builds report
+  `unavailable` (no login-keychain fallback, which would prompt the student for a password).
+- Linux and others: no key (`keyProtection: "unavailable"`).
+- Created on first use, reused afterwards. The private key never leaves the OS key store and is
+  never written to disk by SafeAgent.
+
+### hello additions
+
+`hello` adds `attestation`:
+
+```json
+{"keyProtection":"tpm|secure-enclave|software|unavailable","installPublicKey":"<SPKI DER base64url or null>",
+ "selfHash":"<sha256 hex of the running image or null>","selfSigner":"<Authenticode subject / Team ID or null>",
+ "parent":"trusted|untrusted|unknown"}
+```
+
+The server registers `installPublicKey` against student + device and checks `selfHash` against the
+release hashes. Metadata only: `hello` still never probes.
+
+### Parent check
+
+Before `authorize`, `preflight` or `check` does anything, SafeAgent resolves the image of the
+process that launched it and verifies its signature:
+
+- Windows: signer subject `Google LLC` and image name `chrome.exe`. If the parent is `cmd.exe`
+  (Chrome may launch hosts through `cmd.exe`, controlled by the Chrome policy
+  `NativeHostsExecutablesLaunchDirectly`), its own parent must be signed Chrome.
+- macOS: Team ID `EQHXZ8M8AV` (Google), Chrome main or helper binary.
+- Anything else: `ok: false`, `error.code: UNTRUSTED_PARENT`, findings `[]`, nothing scanned.
+- Parent identity that cannot be read is `unknown`, which is treated as untrusted.
+- Dev builds may disable the check with the compile-time variable
+  `SAFEAGENT_ALLOW_ANY_PARENT=true` for local smoke tests. Release builds reject that variable.
+
+### Signed results
+
+Every successful or `PROBE_FAILED` `preflight` and `check` reply adds:
+
+- `signedResult`: base64url of the exact UTF-8 bytes that were signed.
+- `resultSignature`: base64url DER ECDSA P-256 signature over those bytes.
+
+The signed object is generated once by SafeAgent; consumers verify and parse the decoded bytes and
+must never re-serialise:
+
+```json
+{"v":1,"purpose":"assessment-preflight|monitoring","preflightId":"<or null>","sessionId":"<or null>",
+ "challenge":"<authChallenge>","agentInstanceId":"...","agentVersion":"0.3.0","observedAt":0,
+ "capabilities":{"processes":"available","displays":"available","overlays":"available"},
+ "findings":[{"id":"...","category":"...","count":1}],
+ "attestation":{"keyProtection":"tpm","selfHash":"...","selfSigner":"...","parent":"trusted"}}
+```
+
+- When the key is unavailable both fields are `null`: an unsigned result. The server must treat it
+  as untrusted, never as clean.
+- `AUTH_EXPIRED` and pre-authorization errors are never signed.
+- Grant payloads are unchanged in 0.3.0. A server-chosen nonce (plan item 6) is a later, separately
+  negotiated grant version.
+
+New error code: `UNTRUSTED_PARENT`.
+
 ## Replies
 
 All replies contain:
@@ -216,7 +286,7 @@ Codes: INVALID_JSON, INVALID_REQUEST, UNSUPPORTED_VERSION, UNKNOWN_COMMAND,
 MALFORMED_FRAME, FRAME_TOO_LARGE, PROBE_FAILED, UNAUTHORIZED, AUTH_EXPIRED,
 INVALID_AUTHORIZATION, CHALLENGE_MISMATCH, CHALLENGE_REUSED, CHALLENGE_EXPIRED,
 INVALID_SIGNATURE, UNSUPPORTED_CAPABILITY, AUTH_CONFIG_INVALID,
-RANDOM_UNAVAILABLE.
+RANDOM_UNAVAILABLE, UNTRUSTED_PARENT.
 
 ## Observation scope and limitations
 

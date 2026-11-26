@@ -320,11 +320,160 @@ mod tests {
     }
 
     #[test]
+    fn untrusted_parent_refuses_before_grant_and_keeps_challenge() {
+        let (ctx, key, payload) = preflight_fixture();
+        let now = Instant::now();
+        let mut connection = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::untrusted(),
+        };
+        let request = serde_json::to_vec(&preflight_request(&key, &payload)).unwrap();
+        let reply = connection.handle_with_clock(
+            &request,
+            || panic!("untrusted parent scanned"),
+            || (1000, now),
+        );
+        assert_eq!(reply.error.as_ref().unwrap().code, "UNTRUSTED_PARENT");
+        assert!(reply.findings.is_empty() && reply.signed_result.is_none());
+        assert_eq!(
+            reply.attestation.as_ref().unwrap().parent,
+            crate::attestation::Parent::Untrusted
+        );
+        // Refusal happened before grant verification: the same grant still works once trusted.
+        connection.attest = crate::tests_support::trusted();
+        let reply = connection.handle_with_clock(
+            &request,
+            || (crate::probes::capabilities(), vec![]),
+            || (1000, now),
+        );
+        assert_eq!(reply.error.as_ref().map(|e| e.code), None);
+    }
+
+    #[test]
+    fn untrusted_parent_refuses_monitoring_authorize() {
+        let (ctx, key, payload) = fixture();
+        let mut connection = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::untrusted(),
+        };
+        let request = json!({"protocolVersion":2,"requestId":"12345678-1234-4234-8234-123456789abc",
+            "challenge":"correlation-only","command":"authorize",
+            "authorization":sign(&key, &serde_json::to_vec(&payload).unwrap())});
+        let reply = connection.handle_with_clock(
+            &serde_json::to_vec(&request).unwrap(),
+            || panic!("scanned"),
+            || (1000, Instant::now()),
+        );
+        assert_eq!(reply.error.as_ref().unwrap().code, "UNTRUSTED_PARENT");
+        assert_eq!(reply.auth_state.as_deref(), Some("unauthorized"));
+    }
+
+    #[test]
+    fn preflight_result_is_signed_over_exact_bound_bytes() {
+        let (ctx, key, payload) = preflight_fixture();
+        let challenge = ctx.challenge.clone();
+        let instance = ctx.instance_id.clone();
+        let mut connection = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::trusted(),
+        };
+        let request = serde_json::to_vec(&preflight_request(&key, &payload)).unwrap();
+        let reply = connection.handle_with_clock(
+            &request,
+            || {
+                let mut caps = crate::probes::capabilities();
+                for cap in [&mut caps.processes, &mut caps.displays, &mut caps.overlays] {
+                    cap.status = crate::probes::Status::Available;
+                }
+                (
+                    caps,
+                    crate::probes::group_applications(["Discord.exe", "Discord Helper"]),
+                )
+            },
+            || (1000, Instant::now()),
+        );
+        assert!(reply.ok);
+        let bytes = URL_SAFE_NO_PAD
+            .decode(reply.signed_result.as_ref().unwrap())
+            .unwrap();
+        let signature = URL_SAFE_NO_PAD
+            .decode(reply.result_signature.as_ref().unwrap())
+            .unwrap();
+        use sha2::Digest;
+        assert_eq!(
+            signature,
+            sha2::Sha256::digest(&bytes).to_vec(),
+            "test key signs exact bytes"
+        );
+        let signed: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(signed["v"], 1);
+        assert_eq!(signed["purpose"], "assessment-preflight");
+        assert_eq!(
+            signed["preflightId"],
+            "12345678-1234-4234-8234-123456789abc"
+        );
+        assert_eq!(signed["challenge"], json!(challenge));
+        assert_eq!(signed["agentInstanceId"], json!(instance));
+        assert_eq!(signed["observedAt"], json!(reply.observed_at));
+        assert_eq!(signed["capabilities"]["overlays"], "available");
+        assert_eq!(
+            signed["findings"],
+            json!([{"id":"application:discord","category":"communication","count":2}])
+        );
+        assert_eq!(signed["attestation"]["parent"], "trusted");
+        assert_eq!(signed["attestation"]["keyProtection"], "software");
+    }
+
+    #[test]
+    fn keyless_device_returns_unsigned_result_not_an_error() {
+        let (ctx, key, payload) = preflight_fixture();
+        let mut connection = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::keyless(),
+        };
+        let request = serde_json::to_vec(&preflight_request(&key, &payload)).unwrap();
+        let reply = connection.handle_with_clock(
+            &request,
+            || (crate::probes::capabilities(), vec![]),
+            || (1000, Instant::now()),
+        );
+        assert!(reply.signed_result.is_none() && reply.result_signature.is_none());
+        assert_eq!(
+            reply.attestation.as_ref().unwrap().key_protection,
+            crate::attestation::KeyProtection::Unavailable
+        );
+    }
+
+    #[test]
+    fn hello_reports_attestation_without_scanning() {
+        let (ctx, _, _) = fixture();
+        let mut connection = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::untrusted(),
+        };
+        let request = serde_json::to_vec(&json!({"protocolVersion":2,
+            "requestId":"12345678-1234-4234-8234-123456789abc",
+            "challenge":"correlation-only","command":"hello"}))
+        .unwrap();
+        let reply = connection.handle_with_probe(&request, || panic!("hello scanned"));
+        assert!(
+            reply.ok,
+            "hello stays metadata-only even with an untrusted parent"
+        );
+        let attestation = reply.attestation.unwrap();
+        assert!(attestation.install_public_key.is_some());
+        assert!(reply.signed_result.is_none());
+    }
+
+    #[test]
     fn preflight_is_one_shot_even_on_probe_failure_and_never_authorizes_monitoring() {
         for failed in [false, true] {
             let (ctx, key, payload) = preflight_fixture();
             let now = Instant::now();
-            let mut connection = crate::Connection { auth: Ok(ctx) };
+            let mut connection = crate::Connection {
+                auth: Ok(ctx),
+                attest: crate::tests_support::trusted(),
+            };
             let mut request = preflight_request(&key, &payload);
             let reply = connection.handle_with_clock(
                 &serde_json::to_vec(&request).unwrap(),
@@ -492,7 +641,10 @@ mod tests {
             payload["issuedAt"] = json!(issued);
             payload["expiresAt"] = json!(issued + 60_000);
             let now = Instant::now();
-            let mut connection = crate::Connection { auth: Ok(ctx) };
+            let mut connection = crate::Connection {
+                auth: Ok(ctx),
+                attest: crate::tests_support::trusted(),
+            };
             let bytes = serde_json::to_vec(&preflight_request(&key, &payload)).unwrap();
             let end = match expired {
                 0 => (61000, now),
@@ -721,6 +873,7 @@ mod tests {
         for config in ["", "malformed"] {
             let mut connection = crate::Connection {
                 auth: Ok(AuthContext::with_config(config).unwrap()),
+                attest: crate::tests_support::trusted(),
             };
             let request = serde_json::to_vec(&json!({"protocolVersion":2,
                 "requestId":"12345678-1234-4234-8234-123456789abc",
@@ -746,7 +899,10 @@ mod tests {
                 now,
             )
             .unwrap();
-            let mut connection = crate::Connection { auth: Ok(ctx) };
+            let mut connection = crate::Connection {
+                auth: Ok(ctx),
+                attest: crate::tests_support::trusted(),
+            };
             let request = serde_json::to_vec(&json!({"protocolVersion":2,
                 "requestId":"12345678-1234-4234-8234-123456789abc",
                 "challenge":"correlation-only","command":"check"}))
@@ -791,7 +947,10 @@ mod tests {
                 now,
             )
             .unwrap();
-            let mut connection = crate::Connection { auth: Ok(ctx) };
+            let mut connection = crate::Connection {
+                auth: Ok(ctx),
+                attest: crate::tests_support::trusted(),
+            };
             let request = serde_json::to_vec(&json!({"protocolVersion":2,
                 "requestId":"12345678-1234-4234-8234-123456789abc",
                 "challenge":"correlation-only","command":"check"}))
@@ -840,7 +999,10 @@ mod tests {
         let now = Instant::now();
         let auth = sign(&key, &serde_json::to_vec(&payload).unwrap());
         ctx.authorize(&auth, 1000, now).unwrap();
-        let mut first = crate::Connection { auth: Ok(ctx) };
+        let mut first = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::trusted(),
+        };
         let request = serde_json::to_vec(&json!({"protocolVersion":2,
             "requestId":"12345678-1234-4234-8234-123456789abc",
             "challenge":"correlation-only","command":"check"}))
@@ -848,6 +1010,7 @@ mod tests {
         for _ in 0..2 {
             let mut other = crate::Connection {
                 auth: Ok(AuthContext::with_config(&config).unwrap()),
+                attest: crate::tests_support::trusted(),
             };
             assert_eq!(
                 other
@@ -894,7 +1057,10 @@ mod tests {
     fn hello_does_not_refresh_challenge_or_grant_and_preflight_v3_is_rejected() {
         let (ctx, key, mut payload) = fixture();
         let deadline = ctx.challenge_deadline;
-        let mut connection = crate::Connection { auth: Ok(ctx) };
+        let mut connection = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::trusted(),
+        };
         let request = serde_json::to_vec(&json!({"protocolVersion":2,
             "requestId":"12345678-1234-4234-8234-123456789abc",
             "challenge":"correlation-only","command":"hello"}))
@@ -957,7 +1123,10 @@ mod tests {
         let (ctx, key, mut payload) = fixture();
         payload["issuedAt"] = json!(crate::timestamp());
         payload["expiresAt"] = json!(crate::timestamp() + 60000);
-        let mut connection = crate::Connection { auth: Ok(ctx) };
+        let mut connection = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::trusted(),
+        };
         let mut request = json!({"protocolVersion":2,"requestId":"12345678-1234-4234-8234-123456789abc","challenge":"correlation-only","command":"check"});
         let reply = connection.handle_with_probe(&serde_json::to_vec(&request).unwrap(), || {
             panic!("unauthorized probe")
