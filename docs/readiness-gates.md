@@ -3,6 +3,14 @@
 A successful merge is not packaging acceptance. A packaged installer is not
 pilot approval. No workflow here installs software or enables backend rollout.
 
+[Pilot release validation](pilot-release-validation.md) remains the single
+acceptance checklist for the signed-results build: its automated section covers
+merge evidence; its post-packaging device/backend rows supply pilot evidence.
+This document defines gate orchestration, not a replacement acceptance checklist.
+The [security hardening plan](security-hardening-plan.md),
+[threat model](threat-model.md) and [key recovery rules](key-rotation.md) retain
+their security scope; merging native code does not certify cross-repo trust.
+
 | Gate | Workflow | Required evidence | Does not prove |
 | --- | --- | --- | --- |
 | Merge | `safeagent-ci.yml` | Three native target test/build checks, synthetic packaging-tool tests, ephemeral-key authorization and binary smoke | Installer lifecycle, real hardware signals, backend integration |
