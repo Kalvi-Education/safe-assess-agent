@@ -299,3 +299,104 @@ fn remote_observations_report_session_and_catalog_services_only() {
         ServiceState::Unknown
     );
 }
+
+#[test]
+fn renamed_binaries_match_by_original_filename_or_publisher() {
+    use safeagent::signing::{Executable, Signature};
+    let identity = |signature, company: Option<&str>, original: Option<&str>| Executable {
+        signature,
+        company: company.map(str::to_owned),
+        original_filename: original.map(str::to_owned),
+        user_writable: false,
+        is_self: false,
+    };
+    let signed_anydesk = identity(
+        Signature::Signed("AnyDesk Software GmbH".into()),
+        None,
+        None,
+    );
+    let stripped_anydesk = identity(Signature::Unsigned, Some("AnyDesk Software GmbH"), None);
+    let renamed_obs = identity(Signature::Unknown, None, Some("obs64.exe"));
+    let benign = identity(
+        Signature::Signed("Spotify AB".into()),
+        Some("Spotify AB"),
+        None,
+    );
+    let findings = probes::group_processes(
+        [
+            ("notes.exe", Some(&signed_anydesk)),
+            ("helper.exe", Some(&stripped_anydesk)),
+            ("video.exe", Some(&renamed_obs)),
+            ("Spotify.exe", Some(&benign)),
+            ("pythonw.exe", None),
+        ],
+        false,
+    );
+    let ids: Vec<_> = findings.iter().map(|f| f.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "application:anydesk",
+            "application:obs",
+            "application:python"
+        ]
+    );
+    assert_eq!(findings[0].process_count, Some(2));
+}
+
+#[test]
+fn unverified_executables_are_counted_only_when_enabled_and_never_from_unknown() {
+    use safeagent::signing::{Executable, Signature};
+    let identity = |signature, user_writable, is_self| Executable {
+        signature,
+        company: None,
+        original_filename: None,
+        user_writable,
+        is_self,
+    };
+    let unsigned = identity(Signature::Unsigned, true, false);
+    let unknown = identity(Signature::Unknown, false, false);
+    let agent = identity(Signature::Unsigned, true, true);
+    let processes = [
+        ("tool.exe", Some(&unsigned)),
+        ("protected.exe", Some(&unknown)),
+        ("safeagent.exe", Some(&agent)),
+    ];
+    assert!(probes::group_processes(processes, false).is_empty());
+    let findings = probes::group_processes(processes, true);
+    let summary: Vec<_> = findings
+        .iter()
+        .map(|f| (f.id.as_str(), f.category, f.process_count))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("executable:unsigned", "unverified", Some(1)),
+            ("executable:user-writable-path", "unverified", Some(1)),
+        ]
+    );
+}
+
+#[test]
+fn user_writable_heuristic_covers_download_desktop_documents_temp_and_profile_root() {
+    use safeagent::signing::user_writable;
+    let profile = Some(r"C:\Users\student");
+    let temp = Some(r"C:\Users\student\AppData\Local\Temp");
+    for path in [
+        r"C:\Users\student\Downloads\notes.exe",
+        r"c:\users\STUDENT\desktop\x\y.exe",
+        r"C:\Users\student\Documents\tool.exe",
+        r"C:\Users\student\AppData\Local\Temp\a.exe",
+        r"C:\Users\student\run.exe",
+    ] {
+        assert!(user_writable(path, profile, temp), "{path}");
+    }
+    for path in [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Users\student\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+        r"C:\Users\student\AppData\Local\Kalvium\SafeAgent\safeagent.exe",
+        r"C:\Users\studentx\Downloads\a.exe",
+    ] {
+        assert!(!user_writable(path, profile, temp), "{path}");
+    }
+}
