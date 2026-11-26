@@ -258,3 +258,194 @@ fn origin_allowlist_is_strict_and_fail_closed() {
         assert!(!origin_allowed(&origin, id));
     }
 }
+
+#[test]
+fn remote_observations_report_session_and_catalog_services_only() {
+    use safeagent::remote::{strongest, Observations, ServiceState, CATEGORY, SERVICES};
+    let mut services = vec![ServiceState::Absent; SERVICES.len()];
+    services[0] = ServiceState::Running;
+    services[1] = ServiceState::Installed;
+    services[2] = ServiceState::Unknown;
+    let observations = Observations {
+        remote_session: Some(true),
+        remote_control: Some(false),
+        services,
+    };
+    let ids: Vec<_> = observations
+        .findings()
+        .into_iter()
+        .map(|f| {
+            assert_eq!(f.category, CATEGORY);
+            assert!(f.process_count.is_none() && f.window_count.is_none());
+            f.id
+        })
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "remote:session",
+            "remote:service-running:anydesk",
+            "remote:service-installed:teamviewer",
+        ]
+    );
+    assert!(observations.incomplete());
+    assert!(Observations::default().findings().is_empty());
+    assert_eq!(
+        strongest(ServiceState::Unknown, ServiceState::Installed),
+        ServiceState::Installed
+    );
+    assert_eq!(
+        strongest(ServiceState::Absent, ServiceState::Unknown),
+        ServiceState::Unknown
+    );
+}
+
+#[test]
+fn renamed_binaries_match_by_original_filename_or_publisher() {
+    use safeagent::signing::{Executable, Signature};
+    let identity = |signature, company: Option<&str>, original: Option<&str>| Executable {
+        signature,
+        company: company.map(str::to_owned),
+        original_filename: original.map(str::to_owned),
+        user_writable: false,
+        is_self: false,
+    };
+    let signed_anydesk = identity(
+        Signature::Signed("AnyDesk Software GmbH".into()),
+        None,
+        None,
+    );
+    let stripped_anydesk = identity(Signature::Unsigned, Some("AnyDesk Software GmbH"), None);
+    let renamed_obs = identity(Signature::Unknown, None, Some("obs64.exe"));
+    let benign = identity(
+        Signature::Signed("Spotify AB".into()),
+        Some("Spotify AB"),
+        None,
+    );
+    let findings = probes::group_processes([
+        ("notes.exe", Some(&signed_anydesk)),
+        ("helper.exe", Some(&stripped_anydesk)),
+        ("video.exe", Some(&renamed_obs)),
+        ("Spotify.exe", Some(&benign)),
+        ("pythonw.exe", None),
+    ]);
+    let ids: Vec<_> = findings.iter().map(|f| f.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [
+            "application:anydesk",
+            "application:obs",
+            "application:python",
+            "executable:unsigned",
+        ]
+    );
+    assert_eq!(findings[0].process_count, Some(2));
+}
+
+#[test]
+fn unverified_executables_are_counted_but_never_from_unknown_or_self() {
+    use safeagent::signing::{Executable, Signature};
+    let identity = |signature, user_writable, is_self| Executable {
+        signature,
+        company: None,
+        original_filename: None,
+        user_writable,
+        is_self,
+    };
+    let unsigned = identity(Signature::Unsigned, true, false);
+    let unknown = identity(Signature::Unknown, false, false);
+    let agent = identity(Signature::Unsigned, true, true);
+    let processes = [
+        ("tool.exe", Some(&unsigned)),
+        ("protected.exe", Some(&unknown)),
+        ("safeagent.exe", Some(&agent)),
+    ];
+    let findings = probes::group_processes(processes);
+    let summary: Vec<_> = findings
+        .iter()
+        .map(|f| (f.id.as_str(), f.category, f.process_count))
+        .collect();
+    assert_eq!(
+        summary,
+        [
+            ("executable:unsigned", "unverified", Some(1)),
+            ("executable:user-writable-path", "unverified", Some(1)),
+        ]
+    );
+}
+
+#[test]
+fn user_writable_heuristic_covers_download_desktop_documents_temp_and_profile_root() {
+    use safeagent::signing::user_writable;
+    let profile = Some(r"C:\Users\student");
+    let temp = Some(r"C:\Users\student\AppData\Local\Temp");
+    for path in [
+        r"C:\Users\student\Downloads\notes.exe",
+        r"c:\users\STUDENT\desktop\x\y.exe",
+        r"C:\Users\student\Documents\tool.exe",
+        r"C:\Users\student\AppData\Local\Temp\a.exe",
+        r"C:\Users\student\run.exe",
+    ] {
+        assert!(user_writable(path, profile, temp), "{path}");
+    }
+    for path in [
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Users\student\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+        r"C:\Users\student\AppData\Local\Kalvium\SafeAgent\safeagent.exe",
+        r"C:\Users\studentx\Downloads\a.exe",
+    ] {
+        assert!(!user_writable(path, profile, temp), "{path}");
+    }
+}
+
+#[test]
+fn virtual_machine_detection_ignores_plain_hyper_v_hosts() {
+    use safeagent::environment::{finding, is_virtual_machine};
+    assert!(is_virtual_machine(
+        &["Google", "Google Compute Engine"],
+        None
+    ));
+    assert!(is_virtual_machine(&["innotek GmbH", "VirtualBox"], None));
+    assert!(is_virtual_machine(
+        &["Microsoft Corporation", "Virtual Machine"],
+        None
+    ));
+    assert!(is_virtual_machine(
+        &["Dell Inc.", "XPS 13"],
+        Some("VMwareVMware")
+    ));
+    // Hyper-V / VBS on a physical laptop reports "Microsoft Hv": not a VM by itself.
+    assert!(!is_virtual_machine(
+        &["Dell Inc.", "XPS 13"],
+        Some("Microsoft Hv")
+    ));
+    assert!(!is_virtual_machine(&["LENOVO", "ThinkPad"], None));
+    assert_eq!(finding(true).unwrap().id, "environment:virtual-machine");
+    assert!(finding(false).is_none());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn mac_team_id_matches_renamed_app_and_user_writable_paths() {
+    use safeagent::signing::{user_writable_mac, Executable, Signature};
+    let renamed_discord = Executable {
+        signature: Signature::Signed("53Q6R32WPB".into()),
+        company: None,
+        original_filename: None,
+        user_writable: false,
+        is_self: false,
+    };
+    let findings = probes::group_processes([("Notes Helper", Some(&renamed_discord))]);
+    assert_eq!(findings[0].id, "application:discord");
+    let home = Some("/Users/student");
+    assert!(user_writable_mac("/Users/student/Downloads/tool", home));
+    assert!(user_writable_mac("/private/var/folders/ab/T/x", home));
+    assert!(!user_writable_mac(
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        home
+    ));
+    assert!(!user_writable_mac(
+        "/Users/student/Library/Application Support/x",
+        home
+    ));
+}

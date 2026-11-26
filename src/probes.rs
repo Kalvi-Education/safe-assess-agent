@@ -1,3 +1,4 @@
+use crate::signing::{Executable, Signature};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -36,7 +37,7 @@ pub struct Finding {
     pub window_count: Option<usize>,
 }
 
-const PROCESS_LIMITATION: &str = "Visible process names only; exact catalog matches are not verified identities or evidence of active use. Hidden, renamed, inaccessible and browser-hosted applications may be missed. No executable paths, arguments, PIDs or full process inventory are returned.";
+const PROCESS_LIMITATION: &str = "Visible process names plus fixed-name remote-access service lookups and the Windows remote-session flag; exact catalog matches are not verified identities or evidence of active use. Hidden, renamed, inaccessible and browser-hosted applications may be missed; services that cannot be queried are not reported. No executable paths, arguments, PIDs, service inventory or full process inventory are returned.";
 const DISPLAY_LIMITATION: &str = "Active logical displays only; mirrors, virtual displays and physical monitors cannot be reliably distinguished. A single display does not exclude external capture.";
 
 pub fn capabilities() -> Capabilities {
@@ -208,21 +209,96 @@ const APPLICATIONS: &[(&str, &str, &str, &[&str])] = &[
     ("paste", "editor", "Paste", &["paste"]),
     ("ditto", "editor", "Ditto", &["ditto"]),
     ("copyq", "editor", "CopyQ", &["copyq"]),
+    // Automation runtimes: script-driven screen reading and input injection run on these.
+    (
+        "python",
+        "editor",
+        "Python runtime",
+        &["python", "pythonw", "python3", "py"],
+    ),
+    ("nodejs", "editor", "Node.js runtime", &["node"]),
 ];
 
+// Windows Authenticode signer / CompanyName, or macOS Developer Team ID, exact and
+// case-insensitive. Catches renamed binaries (VM case 2). Microsoft- and Apple-signed tools
+// cannot be told apart this way. Confirm values against real binaries before enforcement.
+const PUBLISHERS: &[(&str, &[&str])] = &[
+    (
+        "anydesk",
+        &["AnyDesk Software GmbH", "philandro Software GmbH"],
+    ),
+    (
+        "teamviewer",
+        &["TeamViewer Germany GmbH", "TeamViewer GmbH"],
+    ),
+    ("zoom", &["Zoom Video Communications, Inc."]),
+    // macOS Team IDs below were read with `codesign -dv` from installed apps (26 Nov 2026).
+    ("discord", &["Discord Inc.", "53Q6R32WPB"]),
+    ("chatgpt", &["2DC432GLL2"]),
+    ("lm-studio", &["D65G88RHWN"]),
+    ("perplexity", &["7S8W4W365S"]),
+    ("python", &["Python Software Foundation"]),
+    ("nodejs", &["OpenJS Foundation"]),
+];
+
+fn alias_index(name: &str) -> Option<usize> {
+    let normalized = name.to_ascii_lowercase();
+    let basename = normalized.strip_suffix(".exe").unwrap_or(&normalized);
+    APPLICATIONS
+        .iter()
+        .position(|(_, _, _, aliases)| aliases.contains(&basename))
+}
+
+fn catalog_index(name: &str, executable: Option<&Executable>) -> Option<usize> {
+    alias_index(name).or_else(|| {
+        let executable = executable?;
+        if let Some(index) = executable
+            .original_filename
+            .as_deref()
+            .and_then(alias_index)
+        {
+            return Some(index);
+        }
+        let signer = match &executable.signature {
+            Signature::Signed(signer) => Some(signer.as_str()),
+            _ => None,
+        };
+        [signer, executable.company.as_deref()]
+            .into_iter()
+            .flatten()
+            .find_map(|publisher| {
+                let (id, _) = PUBLISHERS.iter().find(|(_, names)| {
+                    names
+                        .iter()
+                        .any(|name| name.eq_ignore_ascii_case(publisher))
+                })?;
+                APPLICATIONS.iter().position(|(app, ..)| app == id)
+            })
+    })
+}
+
 pub fn group_applications<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<Finding> {
+    group_processes(names.into_iter().map(|name| (name, None)))
+}
+
+/// Catalog matches by name, original filename or publisher, plus counts of unsigned
+/// (other than SafeAgent itself) and user-writable-path processes for server-side
+/// review; signature `Unknown` is never counted as unsigned.
+pub fn group_processes<'a>(
+    processes: impl IntoIterator<Item = (&'a str, Option<&'a Executable>)>,
+) -> Vec<Finding> {
     let mut counts = [0usize; APPLICATIONS.len()];
-    for name in names {
-        let normalized = name.to_ascii_lowercase();
-        let basename = normalized.strip_suffix(".exe").unwrap_or(&normalized);
-        for (index, (_, _, _, aliases)) in APPLICATIONS.iter().enumerate() {
-            if aliases.contains(&basename) {
-                counts[index] += 1;
-                break;
-            }
+    let (mut unsigned, mut user_writable) = (0usize, 0usize);
+    for (name, executable) in processes {
+        if let Some(index) = catalog_index(name, executable) {
+            counts[index] += 1;
+        }
+        if let Some(executable) = executable.filter(|executable| !executable.is_self) {
+            unsigned += usize::from(executable.unverified());
+            user_writable += usize::from(executable.user_writable);
         }
     }
-    APPLICATIONS
+    let mut findings: Vec<Finding> = APPLICATIONS
         .iter()
         .zip(counts)
         .filter(|(_, count)| *count > 0)
@@ -234,7 +310,29 @@ pub fn group_applications<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<F
             display_count: None,
             window_count: None,
         })
-        .collect()
+        .collect();
+    {
+        for (id, label, count) in [
+            ("executable:unsigned", "Unsigned programs running", unsigned),
+            (
+                "executable:user-writable-path",
+                "Programs running from Downloads, Desktop, Documents or Temp",
+                user_writable,
+            ),
+        ] {
+            if count > 0 {
+                findings.push(Finding {
+                    id: id.into(),
+                    category: "unverified",
+                    label: label.into(),
+                    process_count: Some(count),
+                    display_count: None,
+                    window_count: None,
+                });
+            }
+        }
+    }
+    findings
 }
 
 pub fn apply_display_result(
@@ -294,12 +392,24 @@ pub fn scan() -> (Capabilities, Vec<Finding>) {
                 "Process enumeration did not include this agent; process state is unknown.";
         } else {
             caps.processes.status = Status::Available;
-            findings = group_applications(
-                system
-                    .processes()
-                    .values()
-                    .filter_map(|process| process.name().to_str()),
+            let mut identifier = crate::signing::Identifier::default();
+            let identities: Vec<_> = system
+                .processes()
+                .iter()
+                .filter_map(|(pid, process)| {
+                    let name = process.name().to_str()?;
+                    Some((name, identifier.identify(pid.as_u32())))
+                })
+                .collect();
+            findings = group_processes(
+                identities
+                    .iter()
+                    .map(|(name, executable)| (*name, executable.as_deref())),
             );
+            // Unqueryable services stay unreported rather than failing the probe:
+            // per-service ACLs vary and must not turn honest machines into PROBE_FAILED.
+            findings.extend(crate::remote::scan().findings());
+            findings.extend(crate::environment::finding(crate::environment::scan()));
         }
         apply_display_result(&mut caps.displays, display_count(), &mut findings);
         crate::overlays::apply(crate::overlays::scan(), &mut caps.overlays, &mut findings);

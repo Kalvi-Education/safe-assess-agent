@@ -1,6 +1,9 @@
 pub mod auth;
+pub mod environment;
 pub mod overlays;
 pub mod probes;
+pub mod remote;
+pub mod signing;
 
 use auth::{AuthContext, Authorization};
 use probes::{Capabilities, Finding, Status};

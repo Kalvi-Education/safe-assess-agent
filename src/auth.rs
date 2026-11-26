@@ -587,6 +587,40 @@ mod tests {
     }
 
     #[test]
+    fn rotation_ring_accepts_current_and_next_and_rejects_dropped_keys() {
+        let keys: Vec<_> = (0..3u8)
+            .map(|i| SigningKey::from_bytes(&[i + 7; 32]))
+            .collect();
+        let entry = |id: &str, key: &SigningKey| {
+            format!(
+                "{id}:{}",
+                URL_SAFE_NO_PAD.encode(key.verifying_key().as_bytes())
+            )
+        };
+        let ring = format!("{},{}", entry("current", &keys[0]), entry("next", &keys[1]));
+        for (id, key, expected) in [
+            ("current", &keys[0], Ok(())),
+            ("next", &keys[1], Ok(())),
+            // Revoked = removed from the ring: an unknown key ID never authorizes a scan.
+            ("revoked", &keys[2], Err("INVALID_SIGNATURE")),
+            // A known ID with the wrong key also fails.
+            ("current", &keys[1], Err("INVALID_SIGNATURE")),
+        ] {
+            let mut ctx = AuthContext::with_config(&ring).unwrap();
+            let payload = json!({"v":2,"audience":AUDIENCE,"sessionId":"12345678-1234-4234-8234-123456789abc",
+                "agentInstanceId":ctx.instance_id,"challenge":ctx.challenge,"capabilities":CAPABILITIES,
+                "issuedAt":1000,"expiresAt":901000});
+            let bytes = serde_json::to_vec(&payload).unwrap();
+            let mut auth = sign(key, &bytes);
+            auth.key_id = id.into();
+            assert_eq!(ctx.authorize(&auth, 1000, Instant::now()), expected, "{id}");
+            if expected.is_err() {
+                assert!(ctx.authorized(1000, Instant::now()).is_none());
+            }
+        }
+    }
+
+    #[test]
     fn missing_malformed_duplicate_and_weak_key_config_fail_closed() {
         let (ctx, key, payload) = fixture();
         let good = format!(

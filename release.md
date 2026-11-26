@@ -171,6 +171,21 @@ monitoring v2 and advisory preflight v3 grants and [tasks.md](tasks.md) for gate
 
 If notarization, signing, a native build, platform test or approval fails, stop release. Do not rename unsigned packages or publish a subset. After a publish failure inspect the release state before retrying; never overwrite signed assets with unreviewed outputs.
 
+## Certificate procurement and dormant-pipeline gaps (0.2.2 review)
+
+Certificates are **not yet obtained**. The workflow stays dormant (`SAFEAGENT_PRODUCTION_RELEASE_ENABLED=false`).
+Before enabling it:
+
+| Item | Requirement | Pipeline change needed |
+|---|---|---|
+| Windows key storage | Since 1 June 2023, CA/B Forum requires code-signing private keys in a hardware crypto module; EV requires FIPS 140-2 Level 2. A downloadable PFX with a private key is no longer issued. | Replace the `WINDOWS_CERTIFICATE_BASE64`/`PASSWORD` PFX path in `build-windows.ps1` with a cloud HSM signer: Azure Trusted Signing (`signtool /dlib`), DigiCert KeyLocker, or Google Cloud KMS + `jsign`. Use keyless OIDC auth from Actions. |
+| Windows reputation | Do not assume EV removes SmartScreen prompts immediately; reputation builds per certificate and file. Not re-verified against current Microsoft docs. | Keep the "More info, then Run anyway" step in student guidance until telemetry shows prompts are gone. |
+| Apple | Developer ID Application + Developer ID Installer certificates, plus an App Store Connect API key for `notarytool`. | Already implemented (`prepare-macos-signing.sh`, notarize + staple + Gatekeeper assess). The `.p12` secret path remains valid for Apple. |
+| Build allowlist (signed results) | Server needs the expected binary SHA-256 per release. | Publish `SHA256SUMS` of the **inner** `safeagent(.exe)` binaries, not just the installers, in release provenance. |
+
+Owner decisions pending: which Windows signing service; legal entity name on certificates (it
+becomes the `signer` that SafeAgent and the server allowlist check).
+
 ## Signed artifacts versus authenticated updates
 
 There is **no auto-updater**, authenticated update feed, client-side release-manifest verification, enforced minimum-version/anti-downgrade state or automatic rollback in this implementation. Signing and notarization establish artifact publisher/integrity checks at distribution/installation; they do not authenticate observation contents, attest a device, or guarantee that a downloaded version is the currently approved one. Release SHA-256 files detect changes only when their source is trusted; a hash downloaded alongside an untrusted installer is not independent authentication.
