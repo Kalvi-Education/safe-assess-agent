@@ -23,9 +23,19 @@ the **server verifying signed, bound results**, not from hiding the local channe
 | Synthetic input | Injected mouse/keyboard | Injected-input flag counting | Proposed; consent text needed |
 | Screen capture by another app | DXGI / Graphics Capture | None reliable in user mode | Research |
 | Hardware input emulation | USB HID device | None locally | Server-side behavioural signals only |
-| Agent tampering | Patched or replaced SafeAgent | Signed results, build self-report, server build allowlist | Proposed (protocol-v3-proposal.md) |
-| Fake page result | Page posts "ready" without SafeAgent | Server verifies agent signature | Proposed |
-| Launch outside Chrome | Terminal invokes host with an approved origin | Parent-process signer in signed result | Proposed |
+| Agent tampering | Patched or replaced SafeAgent | Signed results, self-reported hash, server build allowlist | 0.2.5 agent side; server verification pending |
+| Fake page result | Page posts "ready" without SafeAgent | Server verifies agent signature | 0.2.5 agent side; server verification pending |
+| Launch outside Chrome | Terminal or wrapper invokes the host | Parent check: signed Chrome required (`UNTRUSTED_PARENT`) | 0.2.5 |
+
+## What a valid signature does and does not prove
+
+- It proves the result came from the process holding that install's device key, unmodified in
+  transit, bound to this preflight/session, challenge and connection.
+- It does **not** prove the agent is untampered. `selfHash` and `parent` are self-reported by the
+  same process; a patched agent can report the expected values and still sign.
+- Non-exportable keys stop copying the key off the device. They do not stop another process
+  running as the same user from asking the OS to sign with it.
+- Unsigned macOS builds have no key at all: every macOS pilot result is unsigned.
 
 ## Residual risk
 

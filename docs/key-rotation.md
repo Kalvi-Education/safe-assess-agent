@@ -38,6 +38,31 @@ Purposes in use: `preflight`, `monitoring`. Runtime: a key ID not in the ring re
 3. Treat results signed by the leaked key since the suspected leak time as untrusted for review.
 4. Write an incident record in the private incident store, not in this public repository.
 
+## Recovery scopes (signed results, 0.2.5+)
+
+Three independent scopes. Never rotate a global key or force a mass upgrade because of one
+unverified client signal. Every privileged action needs administrator approval and an audit entry.
+
+| Scope | Trigger (confirmed, not suspected) | Action | Reuses |
+|---|---|---|---|
+| One installation | A device key is shown to produce false evidence | Revoke that install's P-256 public key server-side; require explicitly authorised fresh enrolment. **A reinstall does not create a new key** (CNG and Keychain keys survive uninstall) | Device enrolment / BOA |
+| One agent release | A build or artifact is compromised | Remove its `binarySha256` from the approved set; publish a patched patch release; raise `ASSESSMENT_V2_SAFEAGENT_VERSION` | HIBu update-required flow, Internal Dev / GCS catalog |
+| Backend grant key | The Ed25519 grant private key leaked | "Emergency revocation" above (current/next ring) | This runbook |
+
+### Signals: suspicious until confirmed
+
+The Assessment API classifies these and shows them in the Assessment Command Center for review.
+None of them alone triggers a recovery action.
+
+| Signal | Classification | Default handling |
+|---|---|---|
+| `resultSignature` invalid for the registered key | Suspicious; confirmed if reproduced | Result untrusted; Required mode: `device_check_untrusted` |
+| `selfHash` not in the approved set / revoked build | Suspicious (could be a stale install) | `unverified-build`; HIBu prompts an update |
+| Device key changed for a known student + device | Suspicious | Treat as new enrolment; needs approval |
+| Replayed result (same preflight / non-increasing `observedAt`) | Confirmed manipulation attempt | Reject; flag the attempt for review |
+| Monitoring gap or unexpected agent restart | Suspicious (crash, sleep, kill) | Flag the attempt; existing waiver/review path |
+| `UNTRUSTED_PARENT` / `keyProtection: unavailable` | Suspicious or unsupported device | Unsigned result; proctor uses the L3 waiver |
+
 ## Tests
 
 - `src/auth.rs` `rotation_ring_accepts_current_and_next_and_rejects_dropped_keys`

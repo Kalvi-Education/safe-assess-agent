@@ -22,11 +22,16 @@ class ProvenanceTests(unittest.TestCase):
                     Path("dist").mkdir()
                     artifact = Path("dist") / f"safeagent-0.2.1-{suffix}"
                     artifact.write_bytes(b"installer-test-placeholder")
+                    exe = "safeagent.exe" if target.endswith("windows-msvc") else "safeagent"
+                    binary = Path("target") / target / "release" / exe
+                    binary.parent.mkdir(parents=True)
+                    binary.write_bytes(b"binary-test-placeholder")
                     env = {"SOURCE_SHA": "a" * 40, "TARGET": target,
                            "SAFEAGENT_AUTH_PUBLIC_KEYS": "approved-id:PUBLIC_VALUE",
                            "GITHUB_SHA": "b" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "1"}
                     metadata = json.dumps({"packages": [{"name": "safeagent", "version": "0.2.1"}]})
-                    with patch.dict(os.environ, env), patch.object(provenance, "command", side_effect=["a" * 40, "", metadata]), patch.object(provenance.subprocess, "run") as run:
+                    with patch.dict(os.environ, env), patch.object(provenance, "command", side_effect=["a" * 40, "", metadata]), patch.object(provenance.subprocess, "run") as run, \
+                            patch.object(provenance.subprocess, "check_output", return_value="parentCheck=enforced\n"):
                         provenance.main()
                         self.assertIn("--internal-dev", run.call_args_list[1].args[0])
                     text = Path("dist/provenance.json").read_text()
@@ -36,6 +41,8 @@ class ProvenanceTests(unittest.TestCase):
                     self.assertEqual(record["extensionIds"], [provenance.DEV_ID])
                     self.assertEqual(record["target"], target)
                     self.assertEqual(record["publicKeyIds"], ["approved-id"])
+                    self.assertEqual(record["binarySha256"], hashlib.sha256(b"binary-test-placeholder").hexdigest())
+                    self.assertEqual(record["parentCheck"], "enforced")
                     self.assertNotIn(b"\r", Path("dist/SHA256SUMS").read_bytes())
                     self.assertNotIn(b"\r", Path("dist/provenance.json").read_bytes())
                     for line in Path("dist/SHA256SUMS").read_text().splitlines():
@@ -43,6 +50,27 @@ class ProvenanceTests(unittest.TestCase):
                         self.assertEqual(digest, hashlib.sha256((Path("dist") / name).read_bytes()).hexdigest())
                 finally:
                     os.chdir(old)
+
+    def test_binary_with_parent_check_disabled_is_refused(self):
+        target = "aarch64-apple-darwin"
+        with tempfile.TemporaryDirectory() as directory:
+            old = os.getcwd()
+            try:
+                os.chdir(directory)
+                Path("dist").mkdir()
+                (Path("dist") / f"safeagent-0.2.1-{provenance.TARGETS[target]}").write_bytes(b"x")
+                binary = Path("target") / target / "release" / "safeagent"
+                binary.parent.mkdir(parents=True)
+                binary.write_bytes(b"y")
+                env = {"SOURCE_SHA": "a" * 40, "TARGET": target}
+                metadata = json.dumps({"packages": [{"name": "safeagent", "version": "0.2.1"}]})
+                with patch.dict(os.environ, env), patch.object(provenance, "command", side_effect=["a" * 40, "", metadata]), \
+                        patch.object(provenance.subprocess, "run"), \
+                        patch.object(provenance.subprocess, "check_output", return_value="parentCheck=disabled\n"), \
+                        self.assertRaises(ValueError):
+                    provenance.main()
+            finally:
+                os.chdir(old)
 
     def test_pilot_rejects_other_versions(self):
         env = {"SOURCE_SHA": "a" * 40, "TARGET": "aarch64-apple-darwin"}

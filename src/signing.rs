@@ -434,6 +434,65 @@ mod macos_impl {
     extern "C" {
         fn proc_pidpath(pid: i32, buffer: *mut c_void, size: u32) -> i32;
     }
+    #[link(name = "Security", kind = "framework")]
+    extern "C" {
+        fn SecRequirementCreateWithString(text: Ref, flags: u32, requirement: *mut Ref) -> i32;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFStringCreateWithBytes(
+            allocator: Ref,
+            bytes: *const u8,
+            length: isize,
+            encoding: u32,
+            external: bool,
+        ) -> Ref;
+    }
+
+    /// Strict check for a trust decision: the main executable is fully hashed against its
+    /// signature and must satisfy `anchor apple generic` with this Team ID. Sealed resources are
+    /// not re-hashed (kSecCSDoNotValidateResources) to keep the check fast on large bundles.
+    pub fn satisfies_team(path: &str, team: &str) -> bool {
+        let requirement_text =
+            format!("anchor apple generic and certificate leaf[subject.OU] = \"{team}\"");
+        unsafe {
+            let url = CFURLCreateFromFileSystemRepresentation(
+                std::ptr::null(),
+                path.as_ptr(),
+                path.len() as isize,
+                false,
+            );
+            if url.is_null() {
+                return false;
+            }
+            let mut code = std::ptr::null();
+            let created = SecStaticCodeCreateWithPath(url, 0, &mut code);
+            CFRelease(url);
+            if created != 0 || code.is_null() {
+                return false;
+            }
+            let text = CFStringCreateWithBytes(
+                std::ptr::null(),
+                requirement_text.as_ptr(),
+                requirement_text.len() as isize,
+                0x0800_0100,
+                false,
+            );
+            let mut requirement = std::ptr::null();
+            let parsed = !text.is_null()
+                && SecRequirementCreateWithString(text, 0, &mut requirement) == 0
+                && !requirement.is_null();
+            let valid = parsed && SecStaticCodeCheckValidity(code, 1 << 2, requirement) == 0;
+            if !text.is_null() {
+                CFRelease(text);
+            }
+            if !requirement.is_null() {
+                CFRelease(requirement);
+            }
+            CFRelease(code);
+            valid
+        }
+    }
 
     // kSecCSBasicValidateOnly: check the signature structure without hashing every page or
     // sealed resource, so large app bundles stay fast. kSecCSSigningInformation = 1 << 1.
@@ -549,4 +608,4 @@ mod macos_impl {
 }
 
 #[cfg(target_os = "macos")]
-pub use macos_impl::user_writable_mac;
+pub use macos_impl::{satisfies_team, user_writable_mac};

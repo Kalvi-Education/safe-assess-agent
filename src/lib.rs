@@ -1,10 +1,16 @@
+pub mod attestation;
 pub mod auth;
+#[cfg(target_os = "macos")]
+mod device_key_macos;
+#[cfg(target_os = "windows")]
+mod device_key_windows;
 pub mod environment;
 pub mod overlays;
 pub mod probes;
 pub mod remote;
 pub mod signing;
 
+use attestation::Parent;
 use auth::{AuthContext, Authorization};
 use probes::{Capabilities, Finding, Status};
 use serde::{Deserialize, Serialize};
@@ -68,6 +74,12 @@ pub struct Reply {
     pub observed_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ProtocolError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attestation: Option<attestation::Attestation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub signed_result: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_signature: Option<String>,
 }
 
 fn timestamp() -> u64 {
@@ -99,6 +111,9 @@ fn base_reply() -> Reply {
         findings: Vec::new(),
         observed_at: timestamp(),
         error: None,
+        attestation: None,
+        signed_result: None,
+        result_signature: None,
     }
 }
 
@@ -129,12 +144,127 @@ pub fn check() -> Reply {
 
 pub struct Connection {
     auth: Result<AuthContext, &'static str>,
+    attest: Attest,
+}
+
+/// Per-connection attestation: built lazily on first use so `hello`-only connections stay cheap.
+pub struct Attest {
+    key: Option<Box<dyn attestation::DeviceKey>>,
+    meta: Option<attestation::Attestation>,
+    open_key: fn() -> Box<dyn attestation::DeviceKey>,
+    parent: fn() -> attestation::Parent,
+}
+
+impl Attest {
+    /// Test seam: injected key and parent verdict, no OS key store or process lookups.
+    #[cfg(test)]
+    pub(crate) fn fixed(
+        open_key: fn() -> Box<dyn attestation::DeviceKey>,
+        parent: fn() -> attestation::Parent,
+    ) -> Self {
+        Self {
+            key: None,
+            meta: None,
+            open_key,
+            parent,
+        }
+    }
+
+    pub fn system() -> Self {
+        Self {
+            key: None,
+            meta: None,
+            open_key: attestation::open_device_key,
+            parent: parent_verdict,
+        }
+    }
+
+    /// Parent identity is evaluated once per connection, then cached. A native-messaging
+    /// connection is one process launched by its parent; the parent cannot change underneath it.
+    fn ensure(&mut self) -> &attestation::Attestation {
+        let (open_key, parent, key_slot) = (self.open_key, self.parent, &mut self.key);
+        self.meta.get_or_insert_with(|| {
+            let key = open_key();
+            let exe = std::env::current_exe().ok();
+            let meta = attestation::Attestation {
+                key_protection: key.protection(),
+                install_public_key: key.public_key_spki().map(|spki| {
+                    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, spki)
+                }),
+                self_hash: exe.as_deref().and_then(attestation::file_sha256),
+                self_signer: exe.as_ref().and_then(|_| self_signer()),
+                parent: parent(),
+            };
+            *key_slot = Some(key);
+            meta
+        })
+    }
+
+    fn parent_trusted(&mut self) -> bool {
+        self.ensure().parent == Parent::Trusted
+    }
+}
+
+fn self_signer() -> Option<String> {
+    let mut identifier = signing::Identifier::default();
+    match identifier.identify(std::process::id())?.signature.clone() {
+        signing::Signature::Signed(signer) => Some(signer),
+        _ => None,
+    }
+}
+
+/// Parent then grandparent, identified with the same signer code used for findings.
+fn parent_verdict() -> attestation::Parent {
+    if attestation::any_parent_allowed() {
+        return attestation::Parent::Trusted;
+    }
+    let mut identifier = signing::Identifier::default();
+    let mut chain = Vec::new();
+    let mut pid = std::process::id();
+    for _ in 0..2 {
+        let Some((parent, image)) = parent_of(pid) else {
+            break;
+        };
+        let identity = identifier.identify(parent).map(|e| (*e).clone());
+        chain.push((image, identity));
+        pid = parent;
+    }
+    let verdict = attestation::classify_parent(&chain);
+    // macOS findings use structure-only signature checks for speed; a trust decision re-checks
+    // the parent's executable hash and Team ID requirement.
+    #[cfg(target_os = "macos")]
+    if verdict == attestation::Parent::Trusted
+        && !chain
+            .first()
+            .is_some_and(|(image, _)| signing::satisfies_team(image, attestation::GOOGLE_TEAM_ID))
+    {
+        return attestation::Parent::Untrusted;
+    }
+    verdict
+}
+
+fn parent_of(pid: u32) -> Option<(u32, String)> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::All,
+        true,
+        ProcessRefreshKind::nothing().with_exe(sysinfo::UpdateKind::Always),
+    );
+    let parent = system.process(Pid::from_u32(pid))?.parent()?;
+    let image = system
+        .process(parent)?
+        .exe()?
+        .to_string_lossy()
+        .into_owned();
+    Some((parent.as_u32(), image))
 }
 
 impl Default for Connection {
     fn default() -> Self {
         Self {
             auth: AuthContext::new(),
+            attest: Attest::system(),
         }
     }
 }
@@ -211,6 +341,7 @@ impl Connection {
                 reply.auth_readiness = Some(ctx.readiness());
                 reply.agent_instance_id = Some(ctx.instance_id.clone());
                 reply.auth_challenge = Some(ctx.challenge.clone());
+                reply.attestation = Some(self.attest.ensure().clone());
             }
             "authorize" => {
                 let Some(auth) = request.authorization else {
@@ -220,6 +351,14 @@ impl Connection {
                         "Detached authorization is required.",
                     );
                 };
+                if !self.attest.parent_trusted() {
+                    reply.attestation = self.attest.meta.clone();
+                    return fail(
+                        reply,
+                        "UNTRUSTED_PARENT",
+                        "SafeAgent must be launched by Google Chrome.",
+                    );
+                }
                 let (wall, now) = clock();
                 if let Err(code) = ctx.authorize(&auth, wall, now) {
                     return fail(reply, code, "Authorization rejected; reconnect for a fresh challenge if expired or consumed.");
@@ -233,6 +372,15 @@ impl Connection {
                         "Detached authorization is required.",
                     );
                 };
+                // Refused before the grant is verified, so the challenge stays unconsumed.
+                if !self.attest.parent_trusted() {
+                    reply.attestation = self.attest.meta.clone();
+                    return fail(
+                        reply,
+                        "UNTRUSTED_PARENT",
+                        "SafeAgent must be launched by Google Chrome.",
+                    );
+                }
                 let (wall, now) = clock();
                 let grant = match ctx.preflight(&auth, wall, now) {
                     Ok(grant) => grant,
@@ -263,6 +411,14 @@ impl Connection {
                         reply,
                         "UNAUTHORIZED",
                         "A current authorization is required.",
+                    );
+                }
+                if !self.attest.parent_trusted() {
+                    reply.attestation = self.attest.meta.clone();
+                    return fail(
+                        reply,
+                        "UNTRUSTED_PARENT",
+                        "SafeAgent must be launched by Google Chrome.",
                     );
                 }
                 (reply.capabilities, reply.findings) = scan();
@@ -302,6 +458,8 @@ impl Connection {
                 "Authorization expired during observation.",
             );
         }
+        let observed = matches!(request.command.as_str(), "preflight" | "check");
+        let (challenge, instance) = (ctx.challenge.clone(), ctx.instance_id.clone());
         if [
             &reply.capabilities.processes,
             &reply.capabilities.displays,
@@ -310,13 +468,54 @@ impl Connection {
         .iter()
         .any(|c| c.status == Status::Error)
         {
-            return fail(
+            reply = fail(
                 reply,
                 "PROBE_FAILED",
                 "At least one probe failed; inspect capability status and limitations.",
             );
         }
+        // Signed last, over the final outcome, so no unsigned field can contradict it.
+        if observed {
+            self.sign(&mut reply, &challenge, &instance);
+        }
         reply
+    }
+}
+
+impl Connection {
+    /// Signs the observation in `reply`. A missing key leaves both fields null: an unsigned
+    /// result the server must treat as untrusted, never as clean.
+    fn sign(&mut self, reply: &mut Reply, challenge: &str, instance: &str) {
+        let meta = self.attest.ensure().clone();
+        let purpose = if reply.preflight_id.is_some() {
+            "assessment-preflight"
+        } else {
+            "monitoring"
+        };
+        let Some(bytes) = attestation::result_bytes(&attestation::ResultInput {
+            purpose,
+            ok: reply.ok,
+            error_code: reply.error.as_ref().map(|e| e.code),
+            auth_state: reply.auth_state.as_deref().unwrap_or("unauthorized"),
+            preflight_id: reply.preflight_id.as_deref(),
+            session_id: reply.session_id.as_deref(),
+            challenge,
+            agent_instance_id: instance,
+            observed_at: reply.observed_at,
+            capabilities: &reply.capabilities,
+            findings: &reply.findings,
+            attestation: &meta,
+        }) else {
+            return;
+        };
+        let signature = self.attest.key.as_ref().and_then(|key| key.sign(&bytes));
+        reply.attestation = Some(meta);
+        if let Some(signature) = signature {
+            use base64::Engine;
+            let encode = |b: &[u8]| base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b);
+            reply.signed_result = Some(encode(&bytes));
+            reply.result_signature = Some(encode(&signature));
+        }
     }
 }
 
@@ -415,5 +614,41 @@ pub fn messaging(reader: &mut impl Read, writer: &mut impl Write) -> io::Result<
             return Err(error);
         }
         write_reply(writer, &connection.handle_request(&payload))?;
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests_support {
+    use crate::attestation::{DeviceKey, Parent};
+    use p256_test::TestKey;
+
+    mod p256_test {
+        /// Deterministic fake key for protocol tests: "signature" = SHA-256 of the message, so
+        /// tests can check the exact signed bytes without a real P-256 implementation.
+        pub struct TestKey;
+        impl super::DeviceKey for TestKey {
+            fn protection(&self) -> crate::attestation::KeyProtection {
+                crate::attestation::KeyProtection::Software
+            }
+            fn public_key_spki(&self) -> Option<Vec<u8>> {
+                crate::attestation::p256_spki(&[7u8; 64])
+            }
+            fn sign(&self, message: &[u8]) -> Option<Vec<u8>> {
+                use sha2::Digest;
+                Some(sha2::Sha256::digest(message).to_vec())
+            }
+        }
+    }
+
+    pub fn trusted() -> crate::Attest {
+        crate::Attest::fixed(|| Box::new(TestKey), || Parent::Trusted)
+    }
+    #[allow(dead_code)]
+    pub fn untrusted() -> crate::Attest {
+        crate::Attest::fixed(|| Box::new(TestKey), || Parent::Untrusted)
+    }
+    #[allow(dead_code)]
+    pub fn keyless() -> crate::Attest {
+        crate::Attest::fixed(|| Box::new(crate::attestation::NoKey), || Parent::Trusted)
     }
 }

@@ -322,13 +322,14 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
 name = "safeagent"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "base64",
  "ed25519-dalek",
  "rand",
  "serde",
  "serde_json",
+ "sha2",
  "sysinfo",
  "uuid",
  "windows",

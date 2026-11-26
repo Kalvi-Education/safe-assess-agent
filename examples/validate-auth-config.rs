@@ -38,6 +38,11 @@ fn validate(config: &str, ids: &str, internal_dev: bool) -> Result<(), &'static 
 }
 
 fn main() {
+    // Distribution builds must enforce the Chrome parent check.
+    if std::env::var("SAFEAGENT_ALLOW_ANY_PARENT").is_ok_and(|value| !value.is_empty()) {
+        eprintln!("SAFEAGENT_ALLOW_ANY_PARENT_FORBIDDEN: parent check must stay enforced");
+        std::process::exit(1);
+    }
     let config = std::env::var("SAFEAGENT_AUTH_PUBLIC_KEYS").unwrap_or_default();
     let ids = std::env::var("SAFEAGENT_ALLOWED_EXTENSION_IDS").unwrap_or_default();
     let internal_dev = std::env::args().any(|arg| arg == "--internal-dev");
