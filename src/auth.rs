@@ -10,6 +10,10 @@ use std::{
 pub const AUDIENCE: &str = "kalvium.safeagent";
 pub const CAPABILITIES: [&str; 3] = ["processes", "displays", "overlays"];
 const MAX_TTL_MS: u64 = 900_000;
+/// The server stamps issued_at on its own clock; a student's clock is routinely behind it by
+/// milliseconds to seconds (Dev VM, 26 Nov: grant issued 16 ms "in the future" -> AUTH_EXPIRED).
+/// Accept that much skew. Signature, single-use challenge, TTL caps and expiry stay strict.
+pub const CLOCK_SKEW_MS: u64 = 30_000;
 const CHALLENGE_TTL: Duration = Duration::from_secs(60);
 
 #[derive(Deserialize, Serialize)]
@@ -58,7 +62,9 @@ pub struct PreflightGrant {
 
 impl PreflightGrant {
     pub fn current(&self, wall: u64, now: Instant) -> bool {
-        wall >= self.payload.issued_at && wall < self.payload.expires_at && now < self.deadline
+        wall.saturating_add(CLOCK_SKEW_MS) >= self.payload.issued_at
+            && wall < self.payload.expires_at
+            && now < self.deadline
     }
 }
 
@@ -189,7 +195,7 @@ impl AuthContext {
         {
             return Err("UNSUPPORTED_CAPABILITY");
         }
-        if payload.issued_at > wall
+        if payload.issued_at > wall.saturating_add(CLOCK_SKEW_MS)
             || payload.expires_at <= wall
             || payload.expires_at <= payload.issued_at
             || payload.expires_at - payload.issued_at > MAX_TTL_MS
@@ -242,7 +248,7 @@ impl AuthContext {
         {
             return Err("UNSUPPORTED_CAPABILITY");
         }
-        if payload.issued_at > wall
+        if payload.issued_at > wall.saturating_add(CLOCK_SKEW_MS)
             || payload.expires_at <= wall
             || payload.expires_at <= payload.issued_at
             || payload.expires_at - payload.issued_at > 60_000
@@ -258,7 +264,11 @@ impl AuthContext {
     pub fn authorized(&self, wall: u64, now: Instant) -> Option<&Payload> {
         self.grant
             .as_ref()
-            .filter(|(p, deadline)| wall >= p.issued_at && wall < p.expires_at && now < *deadline)
+            .filter(|(p, deadline)| {
+                wall.saturating_add(CLOCK_SKEW_MS) >= p.issued_at
+                    && wall < p.expires_at
+                    && now < *deadline
+            })
             .map(|(p, _)| p)
     }
 }
@@ -391,7 +401,8 @@ mod tests {
                 json!(["processes", "processes", "overlays"]),
                 "UNSUPPORTED_CAPABILITY",
             ),
-            ("issuedAt", json!(1001), "AUTH_EXPIRED"),
+            // Beyond the allowed clock skew (1000 + CLOCK_SKEW_MS + 1).
+            ("issuedAt", json!(31001), "AUTH_EXPIRED"),
             ("expiresAt", json!(1000), "AUTH_EXPIRED"),
             ("expiresAt", json!(61001), "AUTH_EXPIRED"),
         ] {
@@ -421,6 +432,24 @@ mod tests {
             ctx.preflight(&auth, 1000, Instant::now()).unwrap_err(),
             "AUTH_CONFIG_INVALID"
         );
+    }
+
+    #[test]
+    fn preflight_accepts_grant_issued_slightly_ahead_of_agent_clock() {
+        // Server clock 16 ms ahead (measured on the Dev VM) and at the 30 s limit are both accepted.
+        for issued_at in [1016u64, 1000 + CLOCK_SKEW_MS] {
+            let (mut ctx, key, mut payload) = preflight_fixture();
+            payload["issuedAt"] = json!(issued_at);
+            payload["expiresAt"] = json!(issued_at + 60_000);
+            let auth = sign(&key, &serde_json::to_vec(&payload).unwrap());
+            let grant = ctx
+                .preflight(&auth, 1000, Instant::now())
+                .expect("skewed grant accepted");
+            assert!(
+                grant.current(1000, Instant::now()),
+                "grant usable at agent wall clock"
+            );
+        }
     }
 
     #[test]
@@ -457,16 +486,21 @@ mod tests {
     #[test]
     fn preflight_expiry_during_probe_discards_and_consumes() {
         for expired in [0, 1, 2] {
-            let (ctx, key, payload) = preflight_fixture();
+            let (ctx, key, mut payload) = preflight_fixture();
+            // Case 2 needs room to roll back further than the skew allowance before issuedAt.
+            let issued: u64 = if expired == 2 { 100_000 } else { 1000 };
+            payload["issuedAt"] = json!(issued);
+            payload["expiresAt"] = json!(issued + 60_000);
             let now = Instant::now();
             let mut connection = crate::Connection { auth: Ok(ctx) };
             let bytes = serde_json::to_vec(&preflight_request(&key, &payload)).unwrap();
             let end = match expired {
                 0 => (61000, now),
                 1 => (1000, now + Duration::from_secs(60)),
-                _ => (999, now),
+                // Rollback beyond the allowed skew before issuedAt.
+                _ => (issued - CLOCK_SKEW_MS - 1, now),
             };
-            let mut times = [(1000, now), end].into_iter();
+            let mut times = [(issued, now), end].into_iter();
             let reply = connection.handle_with_clock(
                 &bytes,
                 || {
@@ -534,7 +568,8 @@ mod tests {
                 json!(["processes", "displays", "overlays", "unknown"]),
                 "UNSUPPORTED_CAPABILITY",
             ),
-            ("issuedAt", json!(1001), "AUTH_EXPIRED"),
+            // Beyond the allowed clock skew (1000 + CLOCK_SKEW_MS + 1).
+            ("issuedAt", json!(31001), "AUTH_EXPIRED"),
             ("expiresAt", json!(1000), "AUTH_EXPIRED"),
             ("expiresAt", json!(901001), "AUTH_EXPIRED"),
             ("expiresAt", json!(u64::MAX), "AUTH_EXPIRED"),
@@ -650,6 +685,19 @@ mod tests {
     }
 
     #[test]
+    fn rollback_beyond_skew_before_issued_at_denies_authorized_checks() {
+        let issued = 100_000;
+        let (mut ctx, key, mut payload) = fixture();
+        payload["issuedAt"] = json!(issued);
+        payload["expiresAt"] = json!(issued + 60_000);
+        let auth = sign(&key, &serde_json::to_vec(&payload).unwrap());
+        let now = Instant::now();
+        ctx.authorize(&auth, issued, now).unwrap();
+        assert!(ctx.authorized(issued - CLOCK_SKEW_MS, now).is_some());
+        assert!(ctx.authorized(issued - CLOCK_SKEW_MS - 1, now).is_none());
+    }
+
+    #[test]
     fn wall_and_monotonic_expiry_and_short_challenge_lifetime() {
         let (mut ctx, key, payload) = fixture();
         let auth = sign(&key, &serde_json::to_vec(&payload).unwrap());
@@ -661,7 +709,8 @@ mod tests {
         ctx.authorize(&auth, 2000, now).unwrap();
         assert!(ctx.authorized(2001, now).is_some());
         assert!(ctx.authorized(901000, now).is_none());
-        assert!(ctx.authorized(999, now).is_none());
+        // Rollback to issuedAt (fixture 1000) stays within the skew allowance.
+        assert!(ctx.authorized(999, now).is_some());
         assert!(ctx
             .authorized(2000, now + Duration::from_millis(899000))
             .is_none());

@@ -124,7 +124,7 @@ unsupported, not a clean pass.
 
 Times are unsigned Unix epoch milliseconds: `issuedAt <= now < expiresAt`,
 `issuedAt < expiresAt`, and `expiresAt - issuedAt <= 900000` (15 minutes).
-There is no future-clock skew allowance. At acceptance, an `Instant` deadline
+`issuedAt` may be up to 30 s (`CLOCK_SKEW_MS`) ahead of the agent's wall clock, because the server stamps it on its own clock and student clocks routinely lag by milliseconds to seconds. Checks also allow rollback to `issuedAt - CLOCK_SKEW_MS`; expiry, TTL caps, signature and single-use challenge are unchanged. At acceptance, an `Instant` deadline
 is set to the remaining wall-clock lifetime. Each check must pass BOTH wall
 and monotonic deadlines. Clock rollback cannot extend the accepted grant;
 rollback before issuedAt also denies checks. Expiry during a probe discards its
