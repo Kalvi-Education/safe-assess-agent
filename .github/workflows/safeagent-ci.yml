@@ -41,34 +41,17 @@ jobs:
           python -B packaging/test-windows-installer.py
       - name: Test actual binary authorization with ephemeral keys
         run: cargo test --locked --test binary-authorization -- --ignored
-      - name: Build Windows development installer
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: >-
-          ./packaging/build-windows.ps1
-          -ExtensionIds $env:SAFEAGENT_ALLOWED_EXTENSION_IDS
+      - name: Build native binary (not an installer)
+        run: cargo build --locked --release --target ${{ matrix.target }}
       - name: Build Windows overlay test harness (test-only, not packaged)
         if: runner.os == 'Windows'
         run: >-
           cargo build --locked --release --example overlay-harness
           --target x86_64-pc-windows-msvc
-      - name: Build macOS development installer
-        if: runner.os == 'macOS'
-        run: >-
-          bash packaging/build-macos.sh '${{ matrix.arch }}'
-          "$SAFEAGENT_ALLOWED_EXTENSION_IDS"
       - name: Smoke actual native binary
         run: >-
           python packaging/smoke-native.py
           target/${{ matrix.target }}/release/safeagent
-      - uses: actions/upload-artifact@v4
-        with:
-          name: safeagent-${{ runner.os }}-${{ matrix.arch }}-UNSIGNED-DEV
-          path: |
-            dist/*.exe
-            dist/*.pkg
-          if-no-files-found: error
-          retention-days: 14
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
