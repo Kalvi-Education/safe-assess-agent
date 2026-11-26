@@ -520,3 +520,32 @@ fn catalog_0_2_4_publisher_match_catches_renamed_messengers() {
         assert!(findings.iter().any(|f| f.id == id), "{signer} -> {id}");
     }
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_helpers_classify_units_sessions_and_paths() {
+    use safeagent::{
+        remote::{linux_remote_session, linux_unit_installed, ServiceState},
+        signing::user_writable_linux,
+    };
+    let dir = std::env::temp_dir().join(format!("safeagent-units-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("anydesk.service"), "").unwrap();
+    assert_eq!(
+        linux_unit_installed(&[dir.as_path()], "anydesk"),
+        ServiceState::Installed
+    );
+    assert_eq!(
+        linux_unit_installed(&[dir.as_path()], "teamviewerd"),
+        ServiceState::Absent
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(linux_remote_session(true, false));
+    assert!(linux_remote_session(false, true));
+    assert!(!linux_remote_session(false, false));
+    let home = Some("/home/student");
+    assert!(user_writable_linux("/home/student/Downloads/tool", home));
+    assert!(user_writable_linux("/tmp/x", home));
+    assert!(!user_writable_linux("/usr/bin/python3", home));
+    assert!(!user_writable_linux("/opt/google/chrome/chrome", home));
+}

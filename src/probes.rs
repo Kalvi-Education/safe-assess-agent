@@ -41,7 +41,11 @@ const PROCESS_LIMITATION: &str = "Visible process names plus fixed-name remote-a
 const DISPLAY_LIMITATION: &str = "Active logical displays only; mirrors, virtual displays and physical monitors cannot be reliably distinguished. A single display does not exclude external capture.";
 
 pub fn capabilities() -> Capabilities {
-    let supported = cfg!(any(target_os = "macos", target_os = "windows"));
+    let supported = cfg!(any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "linux"
+    ));
     Capabilities {
         processes: Capability {
             status: if supported {
@@ -60,7 +64,7 @@ pub fn capabilities() -> Capabilities {
             limitation: DISPLAY_LIMITATION,
         },
         overlays: Capability {
-            status: if supported {
+            status: if cfg!(any(target_os = "macos", target_os = "windows")) {
                 Status::NotChecked
             } else {
                 Status::Unsupported
@@ -651,7 +655,7 @@ pub fn scan() -> (Capabilities, Vec<Finding>) {
     let mut caps = capabilities();
     #[allow(unused_mut)]
     let mut findings = Vec::new();
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
         use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
         let mut system = System::new();
@@ -691,9 +695,37 @@ pub fn scan() -> (Capabilities, Vec<Finding>) {
             findings.extend(crate::environment::finding(crate::environment::scan()));
         }
         apply_display_result(&mut caps.displays, display_count(), &mut findings);
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
         crate::overlays::apply(crate::overlays::scan(), &mut caps.overlays, &mut findings);
+        // Linux: Wayland does not let ordinary clients list other apps' windows and X11 window
+        // metadata is not read yet, so overlays stay explicitly unsupported (never clean, never
+        // PROBE_FAILED).
+        #[cfg(target_os = "linux")]
+        {
+            caps.overlays.status = Status::Unsupported;
+            caps.overlays.limitation = "Overlay and capture-exclusion windows are not observable on Linux; this is not a clean result.";
+        }
     }
     (caps, findings)
+}
+
+/// Connected DRM connectors (`status` file = "connected"). Works on X11 and Wayland.
+#[cfg(target_os = "linux")]
+fn display_count() -> Result<u32, &'static str> {
+    let entries = std::fs::read_dir("/sys/class/drm")
+        .map_err(|_| "Linux display enumeration failed; /sys/class/drm unavailable.")?;
+    let mut count = 0u32;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        // Connector directories look like card0-HDMI-A-1; skip card0 and renderD*.
+        if !name.to_string_lossy().contains('-') {
+            continue;
+        }
+        if let Ok(status) = std::fs::read_to_string(entry.path().join("status")) {
+            count += u32::from(status.trim() == "connected");
+        }
+    }
+    Ok(count)
 }
 
 #[cfg(target_os = "macos")]

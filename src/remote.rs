@@ -225,7 +225,69 @@ pub fn scan() -> Observations {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+/// Linux systemd unit names (without `.service`) per SERVICES row, same order.
+#[cfg(target_os = "linux")]
+const LINUX_UNITS: &[&[&str]] = &[
+    &["anydesk"],
+    &["teamviewerd"],
+    &["rustdesk"],
+    &["chrome-remote-desktop", "chrome-remote-desktop@"],
+    &["x11vnc", "vncserver", "tigervncserver", "wayvnc", "xrdp"],
+    &["SplashtopStreamer"],
+    &["parsec"],
+];
+
+/// Unit file present in a systemd search path = installed. A `/proc/<pid>/comm` match
+/// elsewhere reports Running; the unit directory cannot say whether it is started.
+#[cfg(target_os = "linux")]
+pub fn linux_unit_installed(dirs: &[&std::path::Path], unit: &str) -> ServiceState {
+    let mut state = ServiceState::Absent;
+    for dir in dirs {
+        match dir.join(format!("{unit}.service")).try_exists() {
+            Ok(true) => return ServiceState::Installed,
+            Ok(false) => {}
+            Err(_) => state = ServiceState::Unknown,
+        }
+    }
+    state
+}
+
+/// SSH or an xrdp session marks a remote session. Local graphical sessions report `false`;
+/// a missing variable never proves the session is local, so this is best-effort.
+#[cfg(target_os = "linux")]
+pub fn linux_remote_session(ssh_connection: bool, xrdp_session: bool) -> bool {
+    ssh_connection || xrdp_session
+}
+
+#[cfg(target_os = "linux")]
+pub fn scan() -> Observations {
+    use std::path::Path;
+    let dirs: [&Path; 3] = [
+        Path::new("/etc/systemd/system"),
+        Path::new("/lib/systemd/system"),
+        Path::new("/usr/lib/systemd/system"),
+    ];
+    let services = LINUX_UNITS
+        .iter()
+        .map(|units| {
+            units
+                .iter()
+                .map(|unit| linux_unit_installed(&dirs, unit))
+                .fold(ServiceState::Absent, strongest)
+        })
+        .collect();
+    let remote = linux_remote_session(
+        std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some(),
+        std::env::var_os("XRDP_SESSION").is_some(),
+    );
+    Observations {
+        remote_session: Some(remote),
+        remote_control: None,
+        services,
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 pub fn scan() -> Observations {
     Observations::default()
 }

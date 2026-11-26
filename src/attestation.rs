@@ -52,6 +52,8 @@ fn image_name(path: &str) -> String {
 
 /// Is this image genuine Google Chrome? Windows: signer `Google LLC` and `chrome.exe`.
 /// macOS: Team ID `EQHXZ8M8AV` (main app or a Chrome helper).
+/// Linux (experimental): executables carry no publisher signature, so this is always false and
+/// observations fail closed with `UNTRUSTED_PARENT`; Linux results are never trusted evidence.
 pub fn is_chrome(image: &str, executable: &Executable) -> bool {
     let Signature::Signed(signer) = &executable.signature else {
         return false;
@@ -327,6 +329,16 @@ mod tests {
         );
         assert_eq!(classify_parent(&[(chrome.into(), None)]), Parent::Unknown);
         assert_eq!(classify_parent(&[]), Parent::Unknown);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_parent_never_trusted() {
+        let packaged = signed("package");
+        assert_eq!(
+            classify_parent(&[("/opt/google/chrome/chrome".into(), packaged)]),
+            Parent::Untrusted
+        );
     }
 
     #[cfg(target_os = "windows")]

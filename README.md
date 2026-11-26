@@ -19,8 +19,11 @@ not become clean scans or automatic penalties.
   `authReadiness` separately reports `ready` or `AUTH_CONFIG_INVALID`.
   Standalone `safeagent check` returns unauthorized metadata and exits nonzero.
 - Packaging targets: **Windows x64, macOS arm64 and macOS x64**. These are not
-  a certified OS/browser support matrix. **Linux is unsupported**: all observation
-  capabilities report unsupported and no Linux installer is provided.
+  a certified OS/browser support matrix. **Linux is experimental and unsupported**: an unsigned
+  `.deb` is built only by native CI (`packaging/build-linux.sh`), never by Internal Dev, pilot or
+  release workflows, and is not offered to students. Its results are never trusted evidence: Linux
+  has no executable signatures, so the Chrome parent check fails closed (`UNTRUSTED_PARENT`) and
+  there is no device key. Overlays report `unsupported`.
 - HIBU/backend/Student integration and installed-device compatibility require
   separate acceptance. Everyday browser enrollment must not connect or probe;
   assessment setup requires explicit consent. Local/Dev preflight is advisory,

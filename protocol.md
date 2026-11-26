@@ -325,6 +325,11 @@ RANDOM_UNAVAILABLE, UNTRUSTED_PARENT.
 - Automation runtimes (0.2.2): `python`/`pythonw`/`py` and `node` processes match catalog ids `application:python` and `application:nodejs` (category `editor`, the only existing HIBu-accepted non-remote bucket). Presence is not evidence of automation.
 - Processes (0.2.2, macOS): `proc_pidpath` image path; `SecStaticCodeCheckValidity` (basic structure only, no full page hashing) and `SecCodeCopySigningInformation` give the Developer Team ID (or "Apple" for platform binaries) and signing identifier (bundle ID). Team IDs join the same publisher list; ad-hoc signatures count as unsigned. User-writable: `~/Downloads`, `~/Desktop`, `~/Documents`, `/private/var/folders`, `/tmp`.
 - Environment (0.2.2): `environment:virtual-machine` (category `unverified`) from SMBIOS manufacturer/product (Windows registry `HARDWARE\DESCRIPTION\System\BIOS`) or a non-Microsoft CPUID hypervisor vendor; macOS `kern.hv_vmm_present`. The CPUID hypervisor bit alone is not used, because Hyper-V/VBS sets it on physical laptops. Vendor strings are not returned.
+- Linux (experimental, not a supported distribution): processes by name plus dpkg package
+  ownership, systemd unit names for remote-access services, SSH/xrdp session, VM via DMI vendor,
+  displays via `/sys/class/drm`; overlays `unsupported`. No device key (`keyProtection:
+  unavailable`) and the parent check always fails closed (`UNTRUSTED_PARENT`), so Linux never
+  produces trusted or signed evidence.
 - Other operating systems: process/display/overlay capabilities are unsupported, not a fake clean scan.
 
 No raw process inventory, PIDs, paths, command lines, window titles, browser content, keystrokes or memory contents are returned. No processes are killed or altered. No privilege elevation, shell probes, remediation or network telemetry are performed. Findings are observations for policy review; callers must require their necessary capabilities and communicate remaining gaps.

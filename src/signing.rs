@@ -1,7 +1,7 @@
 //! Executable identity for running processes (D2 signer, D3 version info, D4 unverified).
 //! Values stay in-process for catalog matching; only grouped findings leave the agent.
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,16 +59,110 @@ pub use windows_impl::Identifier;
 #[cfg(target_os = "macos")]
 pub use macos_impl::Identifier;
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(target_os = "linux")]
+pub use linux_impl::Identifier;
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 #[derive(Default)]
 pub struct Identifier {
     _private: (),
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 impl Identifier {
     pub fn identify(&mut self, _pid: u32) -> Option<Rc<Executable>> {
         None
+    }
+}
+
+/// Linux user-writable heuristic: Downloads, Desktop, Documents, hidden home dirs and
+/// temporary folders. Package-managed paths (/usr, /opt, /snap) are not flagged.
+pub fn user_writable_linux(path: &str, home: Option<&str>) -> bool {
+    if path.starts_with("/tmp/") || path.starts_with("/var/tmp/") || path.starts_with("/dev/shm/") {
+        return true;
+    }
+    home.is_some_and(|home| {
+        let home = home.trim_end_matches('/');
+        ["Downloads", "Desktop", "Documents"]
+            .iter()
+            .any(|folder| path.starts_with(&format!("{home}/{folder}/")))
+    })
+}
+
+/// Package owner lookup keyed by file path, built from dpkg `*.list` files. No subprocess.
+#[cfg(target_os = "linux")]
+pub fn dpkg_owned_paths(list_dir: &std::path::Path) -> std::collections::HashSet<String> {
+    let mut owned = std::collections::HashSet::new();
+    let Ok(entries) = std::fs::read_dir(list_dir) else {
+        return owned;
+    };
+    for entry in entries.flatten() {
+        if entry.path().extension().is_some_and(|ext| ext == "list") {
+            if let Ok(text) = std::fs::read_to_string(entry.path()) {
+                owned.extend(text.lines().map(str::to_owned));
+            }
+        }
+    }
+    owned
+}
+
+#[cfg(target_os = "linux")]
+mod linux_impl {
+    use super::{dpkg_owned_paths, user_writable_linux, Executable, Signature};
+    use std::{collections::HashMap, path::PathBuf, rc::Rc};
+
+    pub struct Identifier {
+        by_path: HashMap<PathBuf, Rc<Executable>>,
+        owned: Option<std::collections::HashSet<String>>,
+        self_path: Option<PathBuf>,
+        home: Option<String>,
+    }
+
+    impl Default for Identifier {
+        fn default() -> Self {
+            Self {
+                by_path: HashMap::new(),
+                owned: None,
+                self_path: std::env::current_exe().ok(),
+                home: std::env::var("HOME").ok(),
+            }
+        }
+    }
+
+    impl Identifier {
+        /// Linux has no executable signatures. "Signed" here means the image is owned by an
+        /// installed distro package (dpkg); the "signer" is the literal string `package`.
+        /// Everything else is `Unsigned`; unreadable `/proc/<pid>/exe` is `Unknown`.
+        pub fn identify(&mut self, pid: u32) -> Option<Rc<Executable>> {
+            let exe = std::fs::read_link(format!("/proc/{pid}/exe")).ok()?;
+            if let Some(found) = self.by_path.get(&exe) {
+                return Some(found.clone());
+            }
+            let text = exe
+                .to_string_lossy()
+                .trim_end_matches(" (deleted)")
+                .to_owned();
+            let owned = self.owned.get_or_insert_with(|| {
+                dpkg_owned_paths(std::path::Path::new("/var/lib/dpkg/info"))
+            });
+            let signature = if owned.contains(&text) {
+                Signature::Signed("package".into())
+            } else if owned.is_empty() {
+                // No dpkg database (non-Debian distro): ownership is unknowable, never "unsigned".
+                Signature::Unknown
+            } else {
+                Signature::Unsigned
+            };
+            let executable = Rc::new(Executable {
+                signature,
+                company: None,
+                original_filename: None,
+                user_writable: user_writable_linux(&text, self.home.as_deref()),
+                is_self: self.self_path.as_ref() == Some(&exe),
+            });
+            self.by_path.insert(exe, executable.clone());
+            Some(executable)
+        }
     }
 }
 
