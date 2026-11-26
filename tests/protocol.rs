@@ -335,7 +335,8 @@ fn renamed_binaries_match_by_original_filename_or_publisher() {
         [
             "application:anydesk",
             "application:obs",
-            "application:python"
+            "application:python",
+            "executable:unsigned",
         ]
     );
     assert_eq!(findings[0].process_count, Some(2));
