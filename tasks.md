@@ -19,6 +19,17 @@ do not use historical test totals as current certification.
 - [x] Independent Windows/macOS packaging; CI, internal Dev provenance/private
   GCS tooling and default-off production signing/publication paths.
 
+## Independent gate setup still required
+
+See [readiness gates](docs/readiness-gates.md). Only native CI belongs in merge
+protection; packaging and pilot acceptance remain separate manual decisions.
+
+- [ ] Configure/verify native matrix branch checks and packaging environments.
+- [ ] Configure required reviewers on `safeagent-pilot` before enabling the
+  default-off `SAFEAGENT_PILOT_APPROVAL_ENABLED` repository variable.
+- [ ] Execute the workflows; verify exact-source package evidence and human
+  approval with real device/backend evidence. Definitions alone do not close gates.
+
 ## Cross-PR acceptance still required
 
 The HIBU, Assessment backend, Student/shared V2 UI and BOA reviewer owners must

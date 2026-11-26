@@ -107,6 +107,16 @@ def validate(root, source, workflow, run_id, attempt, key_ring):
             "runAttempt": attempt,
         }
         record = strict_json(files["provenance.json"])
+        binary_hash = record.get("binarySha256") if isinstance(record, dict) else None
+        require(isinstance(binary_hash, str) and re.fullmatch(r"[0-9a-f]{64}", binary_hash) is not None,
+                f"Missing inner binary hash for {target}")
+        expected.update({
+            "binarySha256": binary_hash,
+            "parentCheck": "enforced",
+            "os": platform,
+            "arch": arch,
+            "selfSigner": None,
+        })
         # Exact fields/types prevent extra URLs, secrets or misleading metadata reaching GCS.
         require(record == expected and all(type(record[k]) is type(v) for k, v in expected.items()),
                 f"Provenance mismatch for {target}")
@@ -123,6 +133,8 @@ def validate(root, source, workflow, run_id, attempt, key_ring):
             "provenanceSha256": provenance_hash,
             "checksumsObjectPath": f"{target_prefix}/SHA256SUMS",
             "checksumsSha256": digest(files["SHA256SUMS"]),
+            # Inner executable hash: the server's approved-build allowlist for signed results.
+            "binarySha256": binary_hash,
         })
         for name in (filename, "provenance.json", "SHA256SUMS"):
             uploads.append((f"{target_prefix}/{name}", files[name]))

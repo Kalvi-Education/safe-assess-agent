@@ -9,7 +9,9 @@ installers and signed authorization grants are independent concerns.
 ## Workflow purpose
 
 [Native CI](.github/workflows/safeagent-ci.yml) validates PR/main changes
-with a test identity and unsigned artifacts; it is not the distribution route.
+with a test identity and native binaries, not installers; it is not the
+distribution route. Merge, packaging and pilot approval are
+[independent gates](docs/readiness-gates.md).
 [Internal Dev](.github/workflows/safeagent-internal-dev.yml) is manually
 dispatched from protected main for reviewed-source packages with approved Dev
 identity/keys. Actions-only is its default; private GCS requires the separate
