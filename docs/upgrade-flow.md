@@ -19,11 +19,25 @@ Goal: a student with an old SafeAgent gets "Update required", then three steps
 - Unsigned builds still show SmartScreen ("More info, then Run anyway") or Gatekeeper
   ("Open Anyway"). This goes away only after code signing (release.md).
 
+## Version gate: minimum required, not "latest"
+
+- The backend owns the minimum through `ASSESSMENT_V2_SAFEAGENT_VERSION`, served by
+  `GET /api/v2/safeagent/current` as `requiredVersion`. Publishing a new build does not block
+  anyone. Raise the minimum deliberately, ideally a day before exams, so HIBu's daily setup
+  prompt reaches students before assessment day.
+- Check at Detect and preflight, before Begin. Never re-gate during an attempt.
+- If the version endpoint is unreachable: advisory mode shows "unavailable" and allows Begin;
+  Mandatory mode is decided by the server (below), not by HIBu.
+
 ## What HIBu does (hibu#33)
 
-1. On Detect or preflight, if `hello.agentVersion` is older than `requiredVersion` from
-   `GET /api/v2/safeagent/current` (or outside `approvedAgentVersions`), stop with reason
-   `update_required`. HIBu already emits this; see `native-preflight.js`.
+1. **Gap today:** `native-preflight.js` only checks `isApprovedAgentVersion`, and
+   `hibuConfig.js` requires the approved list to be `['0.2.x']`, so a 0.2.1 agent passes
+   preflight even after the backend requires 0.2.2. Only the setup page (`safeAgentSetup.js`)
+   compares against `requiredVersion`. Fix: preflight must also reject
+   `compareVersions(agentVersion, requiredVersion) < 0` (or a null comparison) with reason
+   `update_required`, using the existing helper. The reason already exists in
+   `native-preflight.js`, `preflightPageBridge.js` and `preflightSession.js`.
 2. Open `safeagent-setup.html?reason=update` in a new tab, never replacing the assessment tab.
    The page already renders the `outdated` status ("installed X, needed Y").
 3. Page copy, per OS:
@@ -42,6 +56,13 @@ Goal: a student with an old SafeAgent gets "Update required", then three steps
    observation when this category appears.
 
 ## What the backend does (nucleus-apps `fix/safeagent-version-config`)
+
+- **Server-side enforcement (Mandatory mode):** HIBu and the page are client-side, so their gate
+  is UX, not enforcement. Attempt-start must reject a stored preflight whose reported
+  `agentVersion` is below `ASSESSMENT_V2_SAFEAGENT_VERSION`, with an "update required" reason the
+  page can show. Caveat: `agentVersion` is self-reported, so a patched binary can claim any
+  version. That closes only with signed results plus the build-hash allowlist
+  (protocol-v3-proposal.md).
 
 - Set `ASSESSMENT_V2_SAFEAGENT_VERSION=0.2.2` together with the source commit, **after** HIBu
   with `unverified` support is live. The public `/api/v2/safeagent/current` then makes every
