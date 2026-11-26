@@ -160,11 +160,29 @@ signed by Microsoft/Apple), `scanMs`, `installAgeSec`, `manifestMatchesSelf`, `p
 - **V7** No change to Windows/macOS behaviour when signed results are disabled (v2 compatibility).
 - State plainly what each did **not** cover.
 
-## Decisions needed
+## Decisions (Ayush, 26 Nov 2026)
 
-1. **Windows install model:** admin installer (HKLM and Program Files) for everyone, or admin for
-   managed labs only and per-user plus integrity flags for BYOD?
-2. **Chrome policy `NativeMessagingUserLevelHosts=false`:** push it to managed devices?
-3. **Parent allowlist:** Chrome only, or also Edge and Chromium?
-4. **Key protection floor in Prod:** reject `software` keys, or accept them with a flag?
-5. **Mandatory-mode override:** who approves an override when a device cannot sign?
+1. **Windows install model:** admin installer (HKLM + Program Files) for everyone. Per-user install
+   remains only for Dev builds.
+2. **Chrome policy `NativeMessagingUserLevelHosts=false`:** push it through the same admin
+   policy that force-installs HIBu. It makes Chrome ignore per-user hosts, so a student's HKCU
+   entry cannot redirect the host whatever Chrome's HKCU/HKLM order is. Dev and test machines
+   that install per-user need a separate policy group.
+3. **Parent allowlist:** Chrome only. Edge and Chromium are refused (`UNTRUSTED_PARENT`); HIBu is
+   not present there anyway.
+4. **Key protection:** accept software-only keys at first, flagged, with enforcement configurable
+   per assessment:
+
+| Environment | Hardware-backed key | Software-only key |
+|---|---|---|
+| Development | Accept | Accept |
+| Production pilot | Accept | Accept + flag |
+| Regular assessments | Accept | Configurable |
+| High-stakes assessments | Require | Reject |
+
+5. **Override when a device cannot sign: open.** "Cannot sign" means: key store error (TPM,
+   Windows key store or Keychain failure, blocked by security software); key lost (TPM cleared,
+   OS reinstall, profile reset) and re-registration needed; unsupported device (Linux, ChromeOS,
+   Windows ARM); or a refused parent (not Chrome). A device without a TPM is not "cannot sign":
+   it signs with a software key. Proposal: proctor override per student in the Assessment
+   Command Center with a reason and audit entry; high-stakes assessments need a second approver.
