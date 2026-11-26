@@ -130,7 +130,21 @@ pub fn scan() -> bool {
     status == 0 && present == 1
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+#[cfg(target_os = "linux")]
+pub fn scan() -> bool {
+    let read = |name: &str| std::fs::read_to_string(format!("/sys/class/dmi/id/{name}")).ok();
+    let values: Vec<String> = ["sys_vendor", "product_name", "board_vendor", "bios_vendor"]
+        .iter()
+        .filter_map(|name| read(name))
+        .map(|value| value.trim().to_owned())
+        .collect();
+    let firmware: Vec<&str> = values.iter().map(String::as_str).collect();
+    // The generic CPU "hypervisor" flag is not used alone: it is set on hosts running a
+    // hypervisor too. Vendor names are the signal; absent DMI is "unknown", not a VM.
+    is_virtual_machine(&firmware, None)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 pub fn scan() -> bool {
     false
 }

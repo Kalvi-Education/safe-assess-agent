@@ -77,3 +77,27 @@ jobs:
             target/x86_64-pc-windows-msvc/release/examples/overlay-harness.exe
           if-no-files-found: error
           retention-days: 14
+  # Experimental Linux package. Separate job: it never gates or alters the Windows/macOS matrix.
+  linux-experimental:
+    runs-on: ubuntu-24.04
+    env:
+      SAFEAGENT_ALLOWED_EXTENSION_IDS: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test Linux native target
+        run: cargo test --locked
+      - name: Build experimental .deb
+        run: bash packaging/build-linux.sh amd64 "$SAFEAGENT_ALLOWED_EXTENSION_IDS"
+      - name: Install, launch like Chrome, remove
+        run: |
+          sudo dpkg -i dist/safeagent-*-linux-amd64-*.deb
+          python3 packaging/smoke-native.py /opt/kalvium/safeagent/safeagent
+          test -L /etc/opt/chrome/native-messaging-hosts/com.kalvium.safeagent.json
+          sudo dpkg -r kalvium-safeagent
+          test ! -e /opt/kalvium
+      - uses: actions/upload-artifact@v4
+        with:
+          name: safeagent-Linux-amd64-UNSIGNED-EXPERIMENTAL
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 14
