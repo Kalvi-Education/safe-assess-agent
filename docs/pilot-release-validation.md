@@ -14,12 +14,24 @@ Assessment API.** Any reproduction of that is P0.
 
 | Field | Value |
 |---|---|
-| Source SHA (merge commit on main) | _fill after merge_ |
-| Internal Dev run ID | _fill_ |
-| Windows installer SHA-256 / inner `safeagent.exe` SHA-256 | _from SHA256SUMS / provenance `binarySha256`_ |
-| macOS arm64 / x64 pkg SHA-256 / inner binary SHA-256 | _fill_ |
-| HIBu build | _fill_ |
-| Assessment API build and flags | _fill_ |
+| Version / wire protocol | 0.2.5 / 2 |
+| Source SHA (main) | `5236be5fa611f422acc91fcede5bffca866b7af3` (combined CI run 45886533608: Windows x64, macOS arm64, macOS x64, Linux experimental, all success) |
+| Internal Dev run | [45887877118](https://github.com/Kalvi-Education/safe-assess-agent/actions/runs/45887877118), `publish_to_dev_gcs=false` (publish job skipped by design); Actions artifacts only, 14-day retention |
+| Channel / signing | `internal-dev`, `signatureStatus: unsigned`, not notarised; macOS binaries ad-hoc signed by the linker (no Team ID) |
+| Embedded config | extension ID `lfmldljfbheedcddndbnfckfkhjmkekp`; key IDs `dev-preflight-20261016`, `dev-monitoring-20261016`; no `prod-` keys |
+| Test bypass | `parentCheck=enforced` in provenance; macOS binaries: `--build-info` → `parentCheck=enforced`; no `SAFEAGENT_ALLOW_ANY_PARENT`, CI test extension ID, `unit-test` key or private key strings found |
+
+| Artifact | Installer SHA-256 | Inner binary SHA-256 (`binarySha256`) | Verified |
+|---|---|---|---|
+| `safeagent-0.2.5-windows-x64.exe` | `22d9a185de2a6e6750009ebd237e072e9260ca157cc5a6d9808ffb0e3ab3532e` | `54f371b9937ed4c2bb051380c61edf38305bd2e8f69624a5d9075204022c35fb` | SHA256SUMS OK. **Inner hash and binary strings NOT_RUN**: innoextract 1.9 cannot read this Inno Setup 6 installer; verify on the Windows VM (`Get-FileHash` of the installed `safeagent.exe`) |
+| `safeagent-0.2.5-macos-arm64.pkg` | `b051e33d811ad46b38a1aad54a3421619c2f4ec8126b1081799807334e716484` | `b5bebbbb7393c1327e96d37d82ad8484a8283979d606679db95200b2d9891c21` | SHA256SUMS OK; extracted binary hash matches; `--version` 0.2.5; manifest path and origin correct |
+| `safeagent-0.2.5-macos-x64.pkg` | `5de310bb9543bac1d6dc79c17979c0112fe8be1554f633d5588973364253684a` | `593289d997f95cec3bdf1281991f9affda936090933be2e36133a4f8d59d2633` | SHA256SUMS OK; extracted binary hash matches; manifest correct (not executed: arm64 host) |
+| Linux `.deb` | — | — | Excluded: experimental, native CI only, not in this run or any catalog |
+
+| Integration | Build | Note |
+|---|---|---|
+| HIBu | `hibu#33` head `b0007a9` (manifest 1.7.10; Dev Testing 1.7.14 seen on devices) | Has no handling for `attestation` / `signedResult` / `resultSignature` / `UNTRUSTED_PARENT` yet. Its preflight validation does not exact-match top-level reply keys, so extra fields are expected to pass (verify LIF-01) |
+| Assessment API | nucleus-apps `main` `3690a4fa3c` | **No signed-result verification exists**: B4 (RES-*) is BLOCKED until it ships |
 
 All investigators and testers use **this exact build**. A rebuild is a new build under test.
 
