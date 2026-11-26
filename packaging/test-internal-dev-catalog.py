@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -42,18 +43,26 @@ class CatalogTests(unittest.TestCase):
             dist = folder / "dist"
             dist.mkdir()
             (dist / f"safeagent-0.2.1-{suffix}").write_bytes(target.encode())
+            exe = "safeagent.exe" if target.endswith("windows-msvc") else "safeagent"
+            binary = folder / "target" / target / "release" / exe
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(b"binary-" + target.encode())
             previous = Path.cwd()
             try:
                 os.chdir(folder)
                 with patch.dict(os.environ, {**self.env, "TARGET": target}), patch.object(
                     provenance, "command", side_effect=[SOURCE, "", metadata]
-                ), patch.object(provenance.subprocess, "run"):
+                ), patch.object(provenance.subprocess, "run"), patch.object(
+                    provenance.subprocess, "check_output", return_value="parentCheck=enforced\n"
+                ):
                     provenance.main()
             finally:
                 os.chdir(previous)
             for path in dist.iterdir():
                 path.rename(folder / path.name)
             dist.rmdir()
+            # The build tree is not part of the uploaded artifact (workflow uploads dist/ only).
+            shutil.rmtree(folder / "target")
         self.folder = next(self.root.iterdir())
 
     def validate(self, **overrides):

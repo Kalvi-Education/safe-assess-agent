@@ -40,6 +40,14 @@ def main():
     if installers != [installer]:
         raise ValueError("Unexpected installers in distribution directory")
     digest = hashlib.sha256(installer.read_bytes()).hexdigest()
+    binary = Path("target") / target / "release" / ("safeagent.exe" if target.endswith("windows-msvc") else "safeagent")
+    if not binary.is_file():
+        raise ValueError("Expected release binary missing")
+    build_info = subprocess.check_output([str(binary), "--build-info"], text=True).split()
+    if "parentCheck=enforced" not in build_info:
+        raise ValueError("Distributed binary must enforce the Chrome parent check")
+    # The server's build allowlist (signed results) matches this inner-executable hash.
+    binary_digest = hashlib.sha256(binary.read_bytes()).hexdigest()
     provenance = {
         "schemaVersion": 1,
         "channel": "internal-dev",
@@ -58,6 +66,11 @@ def main():
         "installer": installer.name,
         "installerSha256": digest,
         "installerSize": installer.stat().st_size,
+        "binarySha256": binary_digest,
+        "parentCheck": "enforced",
+        "os": "windows" if target.endswith("windows-msvc") else "macos",
+        "arch": "x64" if target.startswith("x86_64") else "arm64",
+        "selfSigner": None,
         "workflowCommit": os.environ["GITHUB_SHA"],
         "runId": os.environ["GITHUB_RUN_ID"],
         "runAttempt": os.environ["GITHUB_RUN_ATTEMPT"],

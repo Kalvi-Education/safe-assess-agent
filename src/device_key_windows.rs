@@ -5,12 +5,16 @@ use crate::attestation::{p256_signature_der, p256_spki, DeviceKey, KeyProtection
 use sha2::{Digest, Sha256};
 use windows::{
     core::{w, PCWSTR},
-    Win32::Security::Cryptography::{
-        NCryptCreatePersistedKey, NCryptExportKey, NCryptFinalizeKey, NCryptFreeObject,
-        NCryptOpenKey, NCryptOpenStorageProvider, NCryptSignHash, BCRYPT_ECCPUBLIC_BLOB,
-        BCRYPT_ECDSA_P256_ALGORITHM, CERT_KEY_SPEC, MS_KEY_STORAGE_PROVIDER,
-        MS_PLATFORM_CRYPTO_PROVIDER, NCRYPT_FLAGS, NCRYPT_HANDLE, NCRYPT_KEY_HANDLE,
-        NCRYPT_PROV_HANDLE, NCRYPT_SILENT_FLAG,
+    Win32::Security::{
+        Cryptography::{
+            NCryptCreatePersistedKey, NCryptExportKey, NCryptFinalizeKey, NCryptFreeObject,
+            NCryptGetProperty, NCryptOpenKey, NCryptOpenStorageProvider, NCryptSignHash,
+            BCRYPT_ECCPUBLIC_BLOB, BCRYPT_ECDSA_P256_ALGORITHM, CERT_KEY_SPEC,
+            MS_KEY_STORAGE_PROVIDER, MS_PLATFORM_CRYPTO_PROVIDER, NCRYPT_ALGORITHM_PROPERTY,
+            NCRYPT_EXPORT_POLICY_PROPERTY, NCRYPT_FLAGS, NCRYPT_HANDLE, NCRYPT_KEY_HANDLE,
+            NCRYPT_LENGTH_PROPERTY, NCRYPT_PROV_HANDLE, NCRYPT_SILENT_FLAG,
+        },
+        OBJECT_SECURITY_INFORMATION,
     },
 };
 
@@ -29,6 +33,45 @@ impl Drop for CngKey {
             let _ = NCryptFreeObject(NCRYPT_HANDLE(self.provider.0));
         }
     }
+}
+
+fn property(key: NCRYPT_KEY_HANDLE, name: PCWSTR) -> Option<Vec<u8>> {
+    let mut size = 0u32;
+    unsafe { NCryptGetProperty(key, name, None, &mut size, OBJECT_SECURITY_INFORMATION(0)) }
+        .ok()?;
+    let mut value = vec![0u8; size as usize];
+    unsafe {
+        NCryptGetProperty(
+            key,
+            name,
+            Some(&mut value),
+            &mut size,
+            OBJECT_SECURITY_INFORMATION(0),
+        )
+    }
+    .ok()?;
+    value.truncate(size as usize);
+    Some(value)
+}
+
+/// An existing key is reused only if it is ECDSA P-256, 256-bit and has no export policy bits.
+/// Anything else (a planted or older key under our name) is not used, and nothing is signed.
+fn acceptable(key: NCRYPT_KEY_HANDLE) -> bool {
+    // CNG returns the algorithm name as NUL-terminated UTF-16LE.
+    let expected: Vec<u8> = "ECDSA_P256\0"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let algorithm_ok = property(key, NCRYPT_ALGORITHM_PROPERTY).is_some_and(|b| b == expected);
+    let length = property(key, NCRYPT_LENGTH_PROPERTY).and_then(|b| {
+        b.get(..4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    });
+    let export = property(key, NCRYPT_EXPORT_POLICY_PROPERTY).and_then(|b| {
+        b.get(..4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    });
+    algorithm_ok && length == Some(256) && export == Some(0)
 }
 
 fn open_in(provider_name: PCWSTR, protection: KeyProtection) -> Option<CngKey> {
@@ -64,11 +107,13 @@ fn open_in(provider_name: PCWSTR, protection: KeyProtection) -> Option<CngKey> {
             return None;
         }
     }
-    Some(CngKey {
+    let candidate = CngKey {
         provider,
         key,
         protection,
-    })
+    };
+    // Drop releases both handles when the key does not meet the policy.
+    acceptable(candidate.key).then_some(candidate)
 }
 
 impl DeviceKey for CngKey {

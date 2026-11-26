@@ -425,6 +425,112 @@ mod tests {
     }
 
     #[test]
+    fn probe_failure_outcome_is_inside_the_signature() {
+        let (ctx, key, payload) = preflight_fixture();
+        let mut connection = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::trusted(),
+        };
+        let request = serde_json::to_vec(&preflight_request(&key, &payload)).unwrap();
+        let reply = connection.handle_with_clock(
+            &request,
+            || {
+                let mut caps = crate::probes::capabilities();
+                caps.displays.status = crate::probes::Status::Error;
+                (caps, vec![])
+            },
+            || (1000, Instant::now()),
+        );
+        assert_eq!(reply.error.as_ref().unwrap().code, "PROBE_FAILED");
+        let signed: Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(reply.signed_result.unwrap())
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(signed["domain"], "kalvium.safeagent.result.v1");
+        assert_eq!(signed["ok"], false);
+        assert_eq!(signed["errorCode"], "PROBE_FAILED");
+        assert_eq!(signed["authState"], "unauthorized");
+        assert_eq!(signed["capabilities"]["displays"], "error");
+    }
+
+    #[test]
+    fn signed_results_are_bound_to_their_own_connection() {
+        let sign_once = || {
+            let (ctx, key, payload) = preflight_fixture();
+            let mut connection = crate::Connection {
+                auth: Ok(ctx),
+                attest: crate::tests_support::trusted(),
+            };
+            let request = serde_json::to_vec(&preflight_request(&key, &payload)).unwrap();
+            let reply = connection.handle_with_clock(
+                &request,
+                || (crate::probes::capabilities(), vec![]),
+                || (1000, Instant::now()),
+            );
+            let bytes = URL_SAFE_NO_PAD
+                .decode(reply.signed_result.unwrap())
+                .unwrap();
+            serde_json::from_slice::<Value>(&bytes).unwrap()
+        };
+        let (a, b) = (sign_once(), sign_once());
+        // Same preflight id, fresh connection: challenge and instance differ, so a captured
+        // result from one connection cannot be presented for another.
+        assert_eq!(a["preflightId"], b["preflightId"]);
+        assert_ne!(a["challenge"], b["challenge"]);
+        assert_ne!(a["agentInstanceId"], b["agentInstanceId"]);
+    }
+
+    #[test]
+    fn monitoring_checks_are_signed_with_session_and_distinct_timestamps() {
+        let (ctx, key, payload) = fixture();
+        let mut connection = crate::Connection {
+            auth: Ok(ctx),
+            attest: crate::tests_support::trusted(),
+        };
+        let authorize = json!({"protocolVersion":2,"requestId":"12345678-1234-4234-8234-123456789abc",
+            "challenge":"correlation-only","command":"authorize",
+            "authorization":sign(&key, &serde_json::to_vec(&payload).unwrap())});
+        let now = Instant::now();
+        assert!(
+            connection
+                .handle_with_clock(
+                    &serde_json::to_vec(&authorize).unwrap(),
+                    || panic!("scanned"),
+                    || (1000, now)
+                )
+                .ok
+        );
+        let check = serde_json::to_vec(&json!({"protocolVersion":2,
+            "requestId":"12345678-1234-4234-8234-123456789abc",
+            "challenge":"correlation-only","command":"check"}))
+        .unwrap();
+        let signed_at = |connection: &mut crate::Connection, wall: u64| {
+            let reply = connection.handle_with_clock(
+                &check,
+                || (crate::probes::capabilities(), vec![]),
+                || (wall, now),
+            );
+            let bytes = URL_SAFE_NO_PAD
+                .decode(reply.signed_result.unwrap())
+                .unwrap();
+            serde_json::from_slice::<Value>(&bytes).unwrap()
+        };
+        let (first, second) = (
+            signed_at(&mut connection, 2000),
+            signed_at(&mut connection, 3000),
+        );
+        assert_eq!(first["purpose"], "monitoring");
+        assert_eq!(first["sessionId"], "12345678-1234-4234-8234-123456789abc");
+        assert_eq!(first["authState"], "authorized");
+        // Repeated checks share the challenge; observedAt orders them. Rejecting a re-presented
+        // check is the server's job (monotonic observedAt per session) until per-check nonces.
+        assert_eq!(first["challenge"], second["challenge"]);
+        assert!(second["observedAt"].as_u64() > first["observedAt"].as_u64());
+    }
+
+    #[test]
     fn keyless_device_returns_unsigned_result_not_an_error() {
         let (ctx, key, payload) = preflight_fixture();
         let mut connection = crate::Connection {

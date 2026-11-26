@@ -39,6 +39,9 @@ def main():
     ids = os.environ.get("SAFEAGENT_ALLOWED_EXTENSION_IDS", "").split(",")
     require(all(re.fullmatch(r"[a-p]{32}", value) for value in ids), "Explicit extension IDs required")
     version = subprocess.run([str(binary), "--version"], capture_output=True, check=True, timeout=10).stdout.decode().strip().split()[-1]
+    build_info = subprocess.run([str(binary), "--build-info"], capture_output=True, check=True, timeout=10).stdout.decode()
+    # Distribution artifacts must enforce the Chrome parent check (no test bypass compiled in).
+    require("parentCheck=enforced" in build_info.split(), "Parent check disabled in distributed binary")
     requests = [dict(protocolVersion=2, requestId=str(uuid.uuid4()), command=command,
                      challenge=secrets.token_hex(16)) for command in ("hello", "check")]
     for launch in ([f"chrome-extension://{ids[0]}/"], ["messaging", f"chrome-extension://{ids[0]}/"]):

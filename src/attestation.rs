@@ -76,8 +76,12 @@ pub fn classify_parent(chain: &[(String, Option<Executable>)]) -> Parent {
     if is_chrome(image, identity) {
         return Parent::Trusted;
     }
-    let is_signed_cmd = image_name(image) == "cmd.exe"
-        && matches!(&identity.signature, Signature::Signed(s) if s.starts_with("Microsoft"));
+    // Only the OS shell in System32/SysWOW64, signed "Microsoft Windows" (catalog-signed OS file).
+    let lower = image.to_ascii_lowercase().replace('/', "\\");
+    let in_system_dir = lower.ends_with("\\windows\\system32\\cmd.exe")
+        || lower.ends_with("\\windows\\syswow64\\cmd.exe");
+    let is_signed_cmd = in_system_dir
+        && matches!(&identity.signature, Signature::Signed(s) if s == "Microsoft Windows");
     if cfg!(target_os = "windows") && is_signed_cmd {
         return match chain.get(1) {
             Some((grand, Some(grand_identity))) if is_chrome(grand, grand_identity) => {
@@ -116,7 +120,13 @@ struct SignedAttestation<'a> {
 #[serde(rename_all = "camelCase")]
 struct SignedResult<'a> {
     v: u32,
+    /// Domain separator: these bytes are only ever a SafeAgent observation result.
+    domain: &'static str,
     purpose: &'a str,
+    /// Outcome the reply claims; signed so unsigned outer fields cannot change the verdict.
+    ok: bool,
+    error_code: Option<&'a str>,
+    auth_state: &'a str,
     preflight_id: Option<&'a str>,
     session_id: Option<&'a str>,
     challenge: &'a str,
@@ -128,8 +138,13 @@ struct SignedResult<'a> {
     attestation: SignedAttestation<'a>,
 }
 
+pub const RESULT_DOMAIN: &str = "kalvium.safeagent.result.v1";
+
 pub struct ResultInput<'a> {
     pub purpose: &'a str,
+    pub ok: bool,
+    pub error_code: Option<&'a str>,
+    pub auth_state: &'a str,
     pub preflight_id: Option<&'a str>,
     pub session_id: Option<&'a str>,
     pub challenge: &'a str,
@@ -145,7 +160,11 @@ pub fn result_bytes(input: &ResultInput) -> Option<Vec<u8>> {
     let caps = input.capabilities;
     let result = SignedResult {
         v: 1,
+        domain: RESULT_DOMAIN,
         purpose: input.purpose,
+        ok: input.ok,
+        error_code: input.error_code,
+        auth_state: input.auth_state,
         preflight_id: input.preflight_id,
         session_id: input.session_id,
         challenge: input.challenge,

@@ -114,6 +114,9 @@ fn find() -> Option<Cf> {
             (kSecReturnRef, kCFBooleanTrue),
             (kSecUseDataProtectionKeychain, kCFBooleanTrue),
             (kSecUseAuthenticationUI, kSecUseAuthenticationUIFail),
+            // Only a Secure Enclave key under our tag is reused; a software key planted under
+            // the same tag never matches, so it can never be reported as `secure-enclave`.
+            (kSecAttrTokenID, kSecAttrTokenIDSecureEnclave),
         ]);
         let mut found = std::ptr::null();
         (SecItemCopyMatching(query.0, &mut found) == 0 && !found.is_null()).then(|| Cf(found))

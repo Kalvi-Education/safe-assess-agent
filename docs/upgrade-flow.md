@@ -19,6 +19,18 @@ Goal: a student with an old SafeAgent gets "Update required", then three steps
 - Unsigned builds still show SmartScreen ("More info, then Run anyway") or Gatekeeper
   ("Open Anyway"). This goes away only after code signing (release.md).
 
+## Upgrade guarantees for signed results (0.2.5)
+
+- In-place: Windows keeps the same `AppId`, folder and HKCU entry; macOS keeps the same package ID
+  and paths. Repeated installs do not create duplicate instances.
+- The device key is per user and lives in CNG / the Keychain, not in the install folder, so it
+  **survives upgrades, reinstalls and uninstalls**. The server's key registration stays valid.
+- Rollback to an approved older 0.2.x is a normal install of that version. The backend minimum
+  version and the approved `binarySha256` set decide whether its results are trusted; a revoked
+  version never regains trusted status by being reinstalled.
+- Interrupted install: re-run the same installer (Windows overwrites; macOS pkg is idempotent).
+- Validation rows: `docs/pilot-release-validation.md` B1 (INS/UPG/UNI) and KEY-04.
+
 ## Version gate: minimum required, not "latest"
 
 - The backend owns the minimum through `ASSESSMENT_V2_SAFEAGENT_VERSION`, served by

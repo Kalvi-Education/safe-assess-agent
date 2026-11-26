@@ -194,7 +194,7 @@ create/issue/complete operations. No active monitoring session is required.
 Unavailable results must be visible and never block admission; local/dev is
 advisory only, with no enforcement in this implementation.
 
-## Result attestation (0.3.0, additive)
+## Result attestation (0.2.5, additive)
 
 Added fields only. Existing v2 fields, codes and grant payloads are unchanged, so HIBu and the
 backend keep working until they adopt these fields.
@@ -240,27 +240,52 @@ process that launched it and verifies its signature:
 
 ### Signed results
 
-Every successful or `PROBE_FAILED` `preflight` and `check` reply adds:
+Every `preflight` and `check` reply that ran an observation (success or `PROBE_FAILED`) adds:
 
 - `signedResult`: base64url of the exact UTF-8 bytes that were signed.
-- `resultSignature`: base64url DER ECDSA P-256 signature over those bytes.
+- `resultSignature`: base64url DER ECDSA P-256 / SHA-256 signature over those bytes.
 
-The signed object is generated once by SafeAgent; consumers verify and parse the decoded bytes and
-must never re-serialise:
+The signed object is produced once, after the final outcome is known. Consumers verify these
+bytes, parse **only** the decoded bytes for every decision, and never re-serialise. Outer reply
+fields (`ok`, `error`, `findings`, `capabilities`, `authState`) are for display only.
 
 ```json
-{"v":1,"purpose":"assessment-preflight|monitoring","preflightId":"<or null>","sessionId":"<or null>",
- "challenge":"<authChallenge>","agentInstanceId":"...","agentVersion":"0.3.0","observedAt":0,
- "capabilities":{"processes":"available","displays":"available","overlays":"available"},
+{"v":1,"domain":"kalvium.safeagent.result.v1","purpose":"assessment-preflight|monitoring",
+ "ok":true,"errorCode":null,"authState":"unauthorized|authorized",
+ "preflightId":"<or null>","sessionId":"<or null>",
+ "challenge":"<authChallenge>","agentInstanceId":"...","agentVersion":"0.2.5","observedAt":0,
+ "capabilities":{"displays":"available","overlays":"available","processes":"available"},
  "findings":[{"id":"...","category":"...","count":1}],
- "attestation":{"keyProtection":"tpm","selfHash":"...","selfSigner":"...","parent":"trusted"}}
+ "attestation":{"keyProtection":"tpm","selfHash":"...","selfSigner":null,"parent":"trusted"}}
 ```
 
-- When the key is unavailable both fields are `null`: an unsigned result. The server must treat it
-  as untrusted, never as clean.
-- `AUTH_EXPIRED` and pre-authorization errors are never signed.
-- Grant payloads are unchanged in 0.3.0. A server-chosen nonce (plan item 6) is a later, separately
-  negotiated grant version.
+- `domain` separates these bytes from any other signature the key might make.
+- Binding: `challenge` and `agentInstanceId` are fresh per connection, so a result from one
+  connection cannot be presented for another. `preflightId` / `sessionId` bind the grant.
+- **Repeated monitoring checks** on one connection share `challenge`; the server must require
+  strictly increasing `observedAt` per session. A server-issued per-check nonce is a later,
+  separately negotiated grant version (hardening plan item 6).
+- When the key is unavailable both fields are absent: an unsigned result the server must treat as
+  untrusted, never as clean.
+- `AUTH_EXPIRED`, `UNTRUSTED_PARENT` and pre-authorization errors are never signed.
+- Grant payloads are unchanged in 0.2.5.
+
+### Key and integrity caveats
+
+- Windows reuses an existing key only if it is ECDSA_P256, 256-bit, with no export policy bits;
+  otherwise nothing is signed with it. macOS reuses only a Secure Enclave key under its tag.
+- Non-exportable means the key cannot be copied off the device; any process running as the same
+  user can still ask the OS to sign with it.
+- `selfHash`, `selfSigner` and `parent` are **self-reported** by the agent. They are evidence for
+  the server's allowlist and review, not independent runtime attestation.
+- Parent identity is evaluated once per connection (one host process per Chrome connection) and
+  cached. On macOS the trust decision re-checks Chrome's executable against
+  `anchor apple generic and certificate leaf[subject.OU] = "EQHXZ8M8AV"`. On Windows the parent is
+  verified with `WinVerifyTrust` (offline, no revocation fetch); the `cmd.exe` intermediary is
+  accepted only from `System32`/`SysWOW64`, signed `Microsoft Windows`, under signed Chrome.
+- The test-only compile-time `SAFEAGENT_ALLOW_ANY_PARENT` is rejected by `validate-auth-config`,
+  by `smoke-native.py` and by Internal Dev provenance, which run `safeagent --build-info` on the
+  actual release binary (`parentCheck=enforced`).
 
 New error code: `UNTRUSTED_PARENT`.
 

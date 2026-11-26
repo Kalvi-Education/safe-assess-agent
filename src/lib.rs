@@ -179,6 +179,8 @@ impl Attest {
         }
     }
 
+    /// Parent identity is evaluated once per connection, then cached. A native-messaging
+    /// connection is one process launched by its parent; the parent cannot change underneath it.
     fn ensure(&mut self) -> &attestation::Attestation {
         let (open_key, parent, key_slot) = (self.open_key, self.parent, &mut self.key);
         self.meta.get_or_insert_with(|| {
@@ -227,7 +229,18 @@ fn parent_verdict() -> attestation::Parent {
         chain.push((image, identity));
         pid = parent;
     }
-    attestation::classify_parent(&chain)
+    let verdict = attestation::classify_parent(&chain);
+    // macOS findings use structure-only signature checks for speed; a trust decision re-checks
+    // the parent's executable hash and Team ID requirement.
+    #[cfg(target_os = "macos")]
+    if verdict == attestation::Parent::Trusted
+        && !chain
+            .first()
+            .is_some_and(|(image, _)| signing::satisfies_team(image, attestation::GOOGLE_TEAM_ID))
+    {
+        return attestation::Parent::Untrusted;
+    }
+    verdict
 }
 
 fn parent_of(pid: u32) -> Option<(u32, String)> {
@@ -445,11 +458,8 @@ impl Connection {
                 "Authorization expired during observation.",
             );
         }
-        if matches!(request.command.as_str(), "preflight" | "check") {
-            let challenge = ctx.challenge.clone();
-            let instance = ctx.instance_id.clone();
-            self.sign(&mut reply, &challenge, &instance);
-        }
+        let observed = matches!(request.command.as_str(), "preflight" | "check");
+        let (challenge, instance) = (ctx.challenge.clone(), ctx.instance_id.clone());
         if [
             &reply.capabilities.processes,
             &reply.capabilities.displays,
@@ -458,11 +468,15 @@ impl Connection {
         .iter()
         .any(|c| c.status == Status::Error)
         {
-            return fail(
+            reply = fail(
                 reply,
                 "PROBE_FAILED",
                 "At least one probe failed; inspect capability status and limitations.",
             );
+        }
+        // Signed last, over the final outcome, so no unsigned field can contradict it.
+        if observed {
+            self.sign(&mut reply, &challenge, &instance);
         }
         reply
     }
@@ -480,6 +494,9 @@ impl Connection {
         };
         let Some(bytes) = attestation::result_bytes(&attestation::ResultInput {
             purpose,
+            ok: reply.ok,
+            error_code: reply.error.as_ref().map(|e| e.code),
+            auth_state: reply.auth_state.as_deref().unwrap_or("unauthorized"),
             preflight_id: reply.preflight_id.as_deref(),
             session_id: reply.session_id.as_deref(),
             challenge,

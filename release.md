@@ -186,6 +186,16 @@ Before enabling it:
 Owner decisions pending: which Windows signing service; legal entity name on certificates (it
 becomes the `signer` that SafeAgent and the server allowlist check).
 
+## Provenance for signed results (0.2.5)
+
+Internal Dev provenance records `binarySha256` (inner executable), `os`, `arch`, `parentCheck`,
+`selfSigner`, source commit, version, channel, signing status and installer hash; the catalog
+copies `binarySha256` per package. This is the server's approved-build allowlist input.
+Packaging runs `safeagent --build-info` on the actual release binary and refuses
+`parentCheck=disabled`. Provenance is an Actions-produced record, **not** an organisation-signed
+manifest: a manifest signed with an externally held key (KMS/HSM, never in this repository) is a
+follow-up before production. Production publication stays disabled.
+
 ## Signed artifacts versus authenticated updates
 
 There is **no auto-updater**, authenticated update feed, client-side release-manifest verification, enforced minimum-version/anti-downgrade state or automatic rollback in this implementation. Signing and notarization establish artifact publisher/integrity checks at distribution/installation; they do not authenticate observation contents, attest a device, or guarantee that a downloaded version is the currently approved one. Release SHA-256 files detect changes only when their source is trusted; a hash downloaded alongside an untrusted installer is not independent authentication.
