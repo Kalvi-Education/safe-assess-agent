@@ -43,14 +43,22 @@ not become clean scans or automatic penalties.
 | [Student update flow](docs/upgrade-flow.md) | In-place upgrade guarantees and the HIBu/backend update contract |
 | [Configuration template](.env.example) | Build inputs and workflow configuration; not automatically loaded |
 
-## Three independent workflows
+## Independent merge, packaging and pilot gates
+
+See [readiness gates](docs/readiness-gates.md) for branch protection, environment
+setup and evidence requirements. Merge success does not imply packaging or pilot
+acceptance; neither manual gate is a required merge check.
 
 - [Native CI](.github/workflows/safeagent-ci.yml): PR/main validation,
-  test-only extension identity, unsigned artifacts; no approved distribution.
+  test-only extension identity, native binaries and a test-only Windows harness;
+  no installers or approved distribution.
 - [Internal Dev](.github/workflows/safeagent-internal-dev.yml): manual
   reviewed-main packaging with the fixed Dev identity and approved public keys.
   Actions-only by default; private Dev GCS additionally requires explicit opt-in
   and its separate default-off flag/environment.
+- [Pilot readiness](.github/workflows/safeagent-pilot.yml): default-off manual
+  evidence verification and separate owner approval for an exact source/package
+  run and bounded scope; no deployment or flag enablement.
 - [Production release](.github/workflows/safeagent-release.yml): dormant
   manual protected-tag signing/notarization and separately approved GitHub Release
   publication. Its own default-off flag does not control CI or Internal Dev.

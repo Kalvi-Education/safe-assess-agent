@@ -1,0 +1,129 @@
+name: SafeAgent pilot readiness approval
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 'Reviewed full commit SHA packaged for this pilot'
+        required: true
+        type: string
+      packaging_run_id:
+        description: 'Successful Internal Dev packaging run in this repository'
+        required: true
+        type: string
+      device_evidence_url:
+        description: >-
+          HTTPS evidence: device matrix, lifecycle tests and installer hashes
+          (no secrets/student data)
+        required: true
+        type: string
+      backend_evidence_url:
+        description: >-
+          HTTPS evidence: consent, signed handshakes, durable receipts,
+          stop/expiry and rollback
+        required: true
+        type: string
+      pilot_scope:
+        description: >-
+          Bounded cohort/devices, owner, monitoring and rollback plan reference
+          (no student identities)
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  evidence:
+    if: vars.SAFEAGENT_PILOT_APPROVAL_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      PACKAGING_RUN_ID: ${{ inputs.packaging_run_id }}
+      DEVICE_EVIDENCE_URL: ${{ inputs.device_evidence_url }}
+      BACKEND_EVIDENCE_URL: ${{ inputs.backend_evidence_url }}
+      PILOT_SCOPE: ${{ inputs.pilot_scope }}
+    steps:
+      - name: Require protected main and bounded evidence inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          test "$GITHUB_REF_PROTECTED" = true
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PACKAGING_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          for key in ('DEVICE_EVIDENCE_URL', 'BACKEND_EVIDENCE_URL'):
+              value = os.environ[key]
+              url = urlsplit(value)
+              assert len(value) <= 2048 and not any(c.isspace() for c in value)
+              assert url.scheme == 'https' and url.hostname
+              assert not url.username and not url.password
+          assert 10 <= len(os.environ['PILOT_SCOPE'].strip()) <= 2000
+          PY
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify source and packaging evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git cat-file -e "$SOURCE_SHA^{commit}"
+          git merge-base --is-ancestor "$SOURCE_SHA" refs/remotes/origin/main
+          run_api="repos/$GH_REPO/actions/runs/$PACKAGING_RUN_ID"
+          gh api "$run_api" > "$RUNNER_TEMP/package-run.json"
+          gh api --paginate --slurp "$run_api/artifacts?per_page=100" \
+            > "$RUNNER_TEMP/package-artifacts.json"
+          python3 - <<'PY'
+          import html
+          import json
+          import os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          run = json.loads((root / 'package-run.json').read_text())
+          assert run['path'] == '.github/workflows/safeagent-internal-dev.yml'
+          assert run['event'] == 'workflow_dispatch'
+          assert run['head_branch'] == 'main'
+          assert run['status'] == 'completed' and run['conclusion'] == 'success'
+          pages = json.loads((root / 'package-artifacts.json').read_text())
+          artifacts = [a for page in pages for a in page['artifacts']]
+          prefix = 'safeagent-UNSIGNED-DEV-' + os.environ['SOURCE_SHA'] + '-'
+          targets = (
+              'x86_64-pc-windows-msvc', 'aarch64-apple-darwin',
+              'x86_64-apple-darwin',
+          )
+          for target in targets:
+              matches = [a for a in artifacts
+                         if a['name'] == prefix + target and not a['expired']]
+              assert len(matches) == 1, 'Missing/expired package: ' + target
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('## Pilot evidence awaiting human review\n\n')
+              keys = (
+                  'SOURCE_SHA', 'PACKAGING_RUN_ID', 'DEVICE_EVIDENCE_URL',
+                  'BACKEND_EVIDENCE_URL', 'PILOT_SCOPE',
+              )
+              for key in keys:
+                  # Inputs are text, not executable Markdown/HTML links.
+                  value = html.escape(os.environ[key])
+                  summary.write(f'<p>{key}: <code>{value}</code></p>\n')
+              summary.write('\nPackages exist; evidence contents require '
+                            'owner review. No rollout is performed.\n')
+          PY
+  approve-pilot:
+    needs: evidence
+    environment: safeagent-pilot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Record bounded pilot approval (no deployment)
+        shell: bash
+        run: |
+          printf '%s\n' '## Pilot readiness approved' \
+            'Scope: source, package run and pilot scope in the evidence job.' \
+            'No deployment, flag enablement or production certification.' \
+            >> "$GITHUB_STEP_SUMMARY"
