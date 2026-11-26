@@ -180,9 +180,14 @@ signed by Microsoft/Apple), `scanMs`, `installAgeSec`, `manifestMatchesSelf`, `p
 | Regular assessments | Accept | Configurable |
 | High-stakes assessments | Require | Reject |
 
-5. **Override when a device cannot sign: open.** "Cannot sign" means: key store error (TPM,
-   Windows key store or Keychain failure, blocked by security software); key lost (TPM cleared,
-   OS reinstall, profile reset) and re-registration needed; unsupported device (Linux, ChromeOS,
-   Windows ARM); or a refused parent (not Chrome). A device without a TPM is not "cannot sign":
-   it signs with a software key. Proposal: proctor override per student in the Assessment
-   Command Center with a reason and audit entry; high-stakes assessments need a second approver.
+5. **Override when a device cannot sign: not a SafeAgent concern.** The existing Layer 3 waiver
+   in nucleus-apps (`_shared/layer3-waivers.js`, merged in #9075) covers it: a `logOnly` waiver
+   still runs and stores the check but never blocks that student. SafeAgent only reports why
+   signing failed (`keyProtection: "unavailable"`, `UNTRUSTED_PARENT`, re-registration needed) so
+   the proctor can decide. Item 7's `device_check_untrusted` rejection must honour `logOnly` like
+   the rest of Required mode.
+
+## Windows install UX change (decision 1)
+
+The admin installer shows a UAC prompt. The student guide and `docs/upgrade-flow.md` gain a
+"Windows asks if this app may make changes: click **Yes**" step, shipped with the item 4 PR.
