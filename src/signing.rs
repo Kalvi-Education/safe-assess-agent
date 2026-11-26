@@ -1,12 +1,13 @@
 //! Executable identity for running processes (D2 signer, D3 version info, D4 unverified).
 //! Values stay in-process for catalog matching; only grouped findings leave the agent.
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Signature {
-    /// Valid Authenticode (embedded or catalog) signature; simple display name of the signer.
+    /// Valid signature. Windows: Authenticode (embedded or catalog) signer display name.
+    /// macOS: Developer Team ID, or "Apple" for platform binaries.
     Signed(String),
     /// Absent, broken or untrusted signature.
     Unsigned,
@@ -55,13 +56,16 @@ pub fn user_writable(path: &str, profile: Option<&str>, temp: Option<&str>) -> b
 #[cfg(target_os = "windows")]
 pub use windows_impl::Identifier;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+pub use macos_impl::Identifier;
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 #[derive(Default)]
 pub struct Identifier {
     _private: (),
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 impl Identifier {
     pub fn identify(&mut self, _pid: u32) -> Option<Rc<Executable>> {
         None
@@ -397,3 +401,152 @@ mod windows_impl {
         (string("CompanyName"), string("OriginalFilename"))
     }
 }
+
+#[cfg(target_os = "macos")]
+mod macos_impl {
+    use super::{Executable, Signature};
+    use std::{collections::HashMap, ffi::c_void, rc::Rc};
+    type Ref = *const c_void;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFRelease(value: Ref);
+        fn CFURLCreateFromFileSystemRepresentation(
+            allocator: Ref,
+            buffer: *const u8,
+            length: isize,
+            directory: bool,
+        ) -> Ref;
+        fn CFDictionaryGetValue(dictionary: Ref, key: Ref) -> Ref;
+        fn CFStringGetCString(string: Ref, buffer: *mut u8, size: isize, encoding: u32) -> bool;
+        fn CFGetTypeID(value: Ref) -> usize;
+        fn CFStringGetTypeID() -> usize;
+    }
+    #[link(name = "Security", kind = "framework")]
+    extern "C" {
+        fn SecStaticCodeCreateWithPath(path: Ref, flags: u32, code: *mut Ref) -> i32;
+        fn SecStaticCodeCheckValidity(code: Ref, flags: u32, requirement: Ref) -> i32;
+        fn SecCodeCopySigningInformation(code: Ref, flags: u32, info: *mut Ref) -> i32;
+        static kSecCodeInfoTeamIdentifier: Ref;
+        static kSecCodeInfoPlatformIdentifier: Ref;
+        static kSecCodeInfoIdentifier: Ref;
+    }
+    extern "C" {
+        fn proc_pidpath(pid: i32, buffer: *mut c_void, size: u32) -> i32;
+    }
+
+    // kSecCSBasicValidateOnly: check the signature structure without hashing every page or
+    // sealed resource, so large app bundles stay fast. kSecCSSigningInformation = 1 << 1.
+    const BASIC_VALIDATE_ONLY: u32 = (1 << 1) | (1 << 2);
+    const SIGNING_INFORMATION: u32 = 1 << 1;
+    const UNSIGNED: [i32; 3] = [-67062, -67061, -67045];
+    const UTF8: u32 = 0x0800_0100;
+
+    #[derive(Default)]
+    pub struct Identifier {
+        by_path: HashMap<Vec<u8>, Rc<Executable>>,
+        self_path: Option<Vec<u8>>,
+    }
+
+    impl Identifier {
+        pub fn identify(&mut self, pid: u32) -> Option<Rc<Executable>> {
+            let mut buffer = [0u8; 4096];
+            let length = unsafe { proc_pidpath(pid as i32, buffer.as_mut_ptr().cast(), 4096) };
+            if length <= 0 {
+                return None;
+            }
+            let path = buffer[..length as usize].to_vec();
+            if let Some(found) = self.by_path.get(&path) {
+                return Some(found.clone());
+            }
+            let self_path = self.self_path.get_or_insert_with(|| {
+                std::env::current_exe()
+                    .map(|path| path.into_os_string().into_encoded_bytes())
+                    .unwrap_or_default()
+            });
+            let text = String::from_utf8_lossy(&path).into_owned();
+            let (signature, bundle) = signature(&path);
+            let home = std::env::var("HOME").ok();
+            let executable = Rc::new(Executable {
+                signature,
+                company: None,
+                original_filename: bundle,
+                user_writable: user_writable_mac(&text, home.as_deref()),
+                is_self: *self_path == path,
+            });
+            self.by_path.insert(path, executable.clone());
+            Some(executable)
+        }
+    }
+
+    /// macOS user-writable heuristic: Downloads, Desktop, Documents and temporary folders.
+    pub fn user_writable_mac(path: &str, home: Option<&str>) -> bool {
+        if path.starts_with("/private/var/folders/")
+            || path.starts_with("/tmp/")
+            || path.starts_with("/private/tmp/")
+        {
+            return true;
+        }
+        home.is_some_and(|home| {
+            ["Downloads", "Desktop", "Documents"].iter().any(|folder| {
+                path.starts_with(&format!("{}/{folder}/", home.trim_end_matches('/')))
+            })
+        })
+    }
+
+    unsafe fn string(dictionary: Ref, key: Ref) -> Option<String> {
+        let value = unsafe { CFDictionaryGetValue(dictionary, key) };
+        if value.is_null() || unsafe { CFGetTypeID(value) != CFStringGetTypeID() } {
+            return None;
+        }
+        let mut buffer = [0u8; 512];
+        unsafe { CFStringGetCString(value, buffer.as_mut_ptr(), 512, UTF8) }.then(|| {
+            let end = buffer.iter().position(|byte| *byte == 0).unwrap_or(0);
+            String::from_utf8_lossy(&buffer[..end]).into_owned()
+        })
+    }
+
+    /// Returns the signature and the signing identifier (bundle ID for apps) used as the
+    /// macOS analogue of OriginalFilename.
+    fn signature(path: &[u8]) -> (Signature, Option<String>) {
+        unsafe {
+            let url = CFURLCreateFromFileSystemRepresentation(
+                std::ptr::null(),
+                path.as_ptr(),
+                path.len() as isize,
+                false,
+            );
+            if url.is_null() {
+                return (Signature::Unknown, None);
+            }
+            let mut code = std::ptr::null();
+            let created = SecStaticCodeCreateWithPath(url, 0, &mut code);
+            CFRelease(url);
+            if created != 0 || code.is_null() {
+                return (Signature::Unknown, None);
+            }
+            let valid = SecStaticCodeCheckValidity(code, BASIC_VALIDATE_ONLY, std::ptr::null());
+            let mut info = std::ptr::null();
+            let copied = SecCodeCopySigningInformation(code, SIGNING_INFORMATION, &mut info);
+            CFRelease(code);
+            if copied != 0 || info.is_null() {
+                return (Signature::Unknown, None);
+            }
+            let identifier = string(info, kSecCodeInfoIdentifier);
+            let team = string(info, kSecCodeInfoTeamIdentifier);
+            let platform = !CFDictionaryGetValue(info, kSecCodeInfoPlatformIdentifier).is_null();
+            CFRelease(info);
+            let signature = match valid {
+                0 if platform => Signature::Signed("Apple".into()),
+                // Ad-hoc signatures (no Team ID) carry no publisher identity.
+                0 => team.map_or(Signature::Unsigned, Signature::Signed),
+                code if UNSIGNED.contains(&code) => Signature::Unsigned,
+                _ => Signature::Unknown,
+            };
+            (signature, identifier)
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub use macos_impl::user_writable_mac;

@@ -219,9 +219,9 @@ const APPLICATIONS: &[(&str, &str, &str, &[&str])] = &[
     ("nodejs", "editor", "Node.js runtime", &["node"]),
 ];
 
-// Authenticode signer or version-info CompanyName, exact and case-insensitive. Catches
-// renamed binaries (VM case 2). Microsoft-signed tools cannot be told apart this way.
-// Names must be confirmed against real binaries before Mandatory enforcement.
+// Windows Authenticode signer / CompanyName, or macOS Developer Team ID, exact and
+// case-insensitive. Catches renamed binaries (VM case 2). Microsoft- and Apple-signed tools
+// cannot be told apart this way. Confirm values against real binaries before enforcement.
 const PUBLISHERS: &[(&str, &[&str])] = &[
     (
         "anydesk",
@@ -232,7 +232,11 @@ const PUBLISHERS: &[(&str, &[&str])] = &[
         &["TeamViewer Germany GmbH", "TeamViewer GmbH"],
     ),
     ("zoom", &["Zoom Video Communications, Inc."]),
-    ("discord", &["Discord Inc."]),
+    // macOS Team IDs below were read with `codesign -dv` from installed apps (26 Nov 2026).
+    ("discord", &["Discord Inc.", "53Q6R32WPB"]),
+    ("chatgpt", &["2DC432GLL2"]),
+    ("lm-studio", &["D65G88RHWN"]),
+    ("perplexity", &["7S8W4W365S"]),
     ("python", &["Python Software Foundation"]),
     ("nodejs", &["OpenJS Foundation"]),
 ];
@@ -405,6 +409,7 @@ pub fn scan() -> (Capabilities, Vec<Finding>) {
             // Unqueryable services stay unreported rather than failing the probe:
             // per-service ACLs vary and must not turn honest machines into PROBE_FAILED.
             findings.extend(crate::remote::scan().findings());
+            findings.extend(crate::environment::finding(crate::environment::scan()));
         }
         apply_display_result(&mut caps.displays, display_count(), &mut findings);
         crate::overlays::apply(crate::overlays::scan(), &mut caps.overlays, &mut findings);

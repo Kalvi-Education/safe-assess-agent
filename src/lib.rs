@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod environment;
 pub mod overlays;
 pub mod probes;
 pub mod remote;

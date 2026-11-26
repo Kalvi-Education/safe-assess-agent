@@ -397,3 +397,55 @@ fn user_writable_heuristic_covers_download_desktop_documents_temp_and_profile_ro
         assert!(!user_writable(path, profile, temp), "{path}");
     }
 }
+
+#[test]
+fn virtual_machine_detection_ignores_plain_hyper_v_hosts() {
+    use safeagent::environment::{finding, is_virtual_machine};
+    assert!(is_virtual_machine(
+        &["Google", "Google Compute Engine"],
+        None
+    ));
+    assert!(is_virtual_machine(&["innotek GmbH", "VirtualBox"], None));
+    assert!(is_virtual_machine(
+        &["Microsoft Corporation", "Virtual Machine"],
+        None
+    ));
+    assert!(is_virtual_machine(
+        &["Dell Inc.", "XPS 13"],
+        Some("VMwareVMware")
+    ));
+    // Hyper-V / VBS on a physical laptop reports "Microsoft Hv": not a VM by itself.
+    assert!(!is_virtual_machine(
+        &["Dell Inc.", "XPS 13"],
+        Some("Microsoft Hv")
+    ));
+    assert!(!is_virtual_machine(&["LENOVO", "ThinkPad"], None));
+    assert_eq!(finding(true).unwrap().id, "environment:virtual-machine");
+    assert!(finding(false).is_none());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn mac_team_id_matches_renamed_app_and_user_writable_paths() {
+    use safeagent::signing::{user_writable_mac, Executable, Signature};
+    let renamed_discord = Executable {
+        signature: Signature::Signed("53Q6R32WPB".into()),
+        company: None,
+        original_filename: None,
+        user_writable: false,
+        is_self: false,
+    };
+    let findings = probes::group_processes([("Notes Helper", Some(&renamed_discord))]);
+    assert_eq!(findings[0].id, "application:discord");
+    let home = Some("/Users/student");
+    assert!(user_writable_mac("/Users/student/Downloads/tool", home));
+    assert!(user_writable_mac("/private/var/folders/ab/T/x", home));
+    assert!(!user_writable_mac(
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        home
+    ));
+    assert!(!user_writable_mac(
+        "/Users/student/Library/Application Support/x",
+        home
+    ));
+}
