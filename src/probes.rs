@@ -274,15 +274,14 @@ fn catalog_index(name: &str, executable: Option<&Executable>) -> Option<usize> {
 }
 
 pub fn group_applications<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<Finding> {
-    group_processes(names.into_iter().map(|name| (name, None)), false)
+    group_processes(names.into_iter().map(|name| (name, None)))
 }
 
-/// Catalog matches by name, original filename or publisher. With `report_unverified`,
-/// also counts unsigned (other than SafeAgent itself) and user-writable-path processes
-/// for server-side review; signature `Unknown` is never counted as unsigned.
+/// Catalog matches by name, original filename or publisher, plus counts of unsigned
+/// (other than SafeAgent itself) and user-writable-path processes for server-side
+/// review; signature `Unknown` is never counted as unsigned.
 pub fn group_processes<'a>(
     processes: impl IntoIterator<Item = (&'a str, Option<&'a Executable>)>,
-    report_unverified: bool,
 ) -> Vec<Finding> {
     let mut counts = [0usize; APPLICATIONS.len()];
     let (mut unsigned, mut user_writable) = (0usize, 0usize);
@@ -308,7 +307,7 @@ pub fn group_processes<'a>(
             window_count: None,
         })
         .collect();
-    if report_unverified {
+    {
         for (id, label, count) in [
             ("executable:unsigned", "Unsigned programs running", unsigned),
             (
@@ -402,7 +401,6 @@ pub fn scan() -> (Capabilities, Vec<Finding>) {
                 identities
                     .iter()
                     .map(|(name, executable)| (*name, executable.as_deref())),
-                crate::signing::report_unverified(),
             );
             // Unqueryable services stay unreported rather than failing the probe:
             // per-service ACLs vary and must not turn honest machines into PROBE_FAILED.

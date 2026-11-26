@@ -16,7 +16,7 @@ the **server verifying signed, bound results**, not from hiding the local channe
 |---|---|---|---|
 | Remote control | AnyDesk, TeamViewer, RDP | Process name/signer, remote session flags, installed services | 0.2.1 name; 0.2.2 signer, session, services |
 | Renamed binary | Signed remote tool renamed to a benign name | Authenticode signer, version-info company/original filename | 0.2.2 (Windows); macOS Team ID planned |
-| Self-built / unsigned tool | Script or packed executable | Unsigned and user-writable-path counts (build flag, default off) | 0.2.2, needs HIBu category |
+| Self-built / unsigned tool | Script or packed executable | Unsigned and user-writable-path counts | 0.2.2, needs HIBu category |
 | Automation runtime | Python/Node-driven screen reading and input injection | Runtime process catalog; signer match | 0.2.2 |
 | Local AI model | Ollama, LM Studio | Catalog name + signer | 0.2.1 name; 0.2.2 signer where listed |
 | Hidden overlay | Capture-excluded or non-activating topmost windows | Window affinity and extended styles | 0.2.1 |

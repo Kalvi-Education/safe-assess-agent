@@ -29,13 +29,6 @@ impl Executable {
     }
 }
 
-/// Compile-time build input, default off: the "unverified-executable" category is
-/// rejected by HIBu validators until hibu#33 accepts it, and an unknown category
-/// would fail the whole observation there.
-pub fn report_unverified() -> bool {
-    option_env!("SAFEAGENT_REPORT_UNVERIFIED_EXECUTABLES") == Some("true")
-}
-
 /// Heuristic, not an ACL check: user-profile download/desktop/document/temp folders and
 /// the profile root. Per-user installs under AppData\Local\Programs are not flagged.
 pub fn user_writable(path: &str, profile: Option<&str>, temp: Option<&str>) -> bool {

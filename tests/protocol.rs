@@ -322,16 +322,13 @@ fn renamed_binaries_match_by_original_filename_or_publisher() {
         Some("Spotify AB"),
         None,
     );
-    let findings = probes::group_processes(
-        [
-            ("notes.exe", Some(&signed_anydesk)),
-            ("helper.exe", Some(&stripped_anydesk)),
-            ("video.exe", Some(&renamed_obs)),
-            ("Spotify.exe", Some(&benign)),
-            ("pythonw.exe", None),
-        ],
-        false,
-    );
+    let findings = probes::group_processes([
+        ("notes.exe", Some(&signed_anydesk)),
+        ("helper.exe", Some(&stripped_anydesk)),
+        ("video.exe", Some(&renamed_obs)),
+        ("Spotify.exe", Some(&benign)),
+        ("pythonw.exe", None),
+    ]);
     let ids: Vec<_> = findings.iter().map(|f| f.id.as_str()).collect();
     assert_eq!(
         ids,
@@ -345,7 +342,7 @@ fn renamed_binaries_match_by_original_filename_or_publisher() {
 }
 
 #[test]
-fn unverified_executables_are_counted_only_when_enabled_and_never_from_unknown() {
+fn unverified_executables_are_counted_but_never_from_unknown_or_self() {
     use safeagent::signing::{Executable, Signature};
     let identity = |signature, user_writable, is_self| Executable {
         signature,
@@ -362,8 +359,7 @@ fn unverified_executables_are_counted_only_when_enabled_and_never_from_unknown()
         ("protected.exe", Some(&unknown)),
         ("safeagent.exe", Some(&agent)),
     ];
-    assert!(probes::group_processes(processes, false).is_empty());
-    let findings = probes::group_processes(processes, true);
+    let findings = probes::group_processes(processes);
     let summary: Vec<_> = findings
         .iter()
         .map(|f| (f.id.as_str(), f.category, f.process_count))
