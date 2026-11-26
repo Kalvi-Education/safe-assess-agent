@@ -14,6 +14,12 @@ UninstallDisplayName=Kalvium SafeAgent
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+; Student path is: Install (or tick the safety box on update) -> Finish. Fewer pages, same checks.
+DisableWelcomePage=yes
+DisableReadyPage=yes
+VersionInfoVersion={#AgentVersion}
+VersionInfoCompany=Kalvium
+VersionInfoProductName=Kalvium SafeAgent
 CloseApplications=no
 RestartApplications=no
 SetupLogging=yes
@@ -29,7 +35,7 @@ Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\com.kalvium.saf
 Type: files; Name: "{app}\com.kalvium.safeagent.json"
 
 [Messages]
-FinishedLabel=SafeAgent is installed.%n%nGo back to your assessment setup page in Chrome and press Detect SafeAgent. You do not need to restart Chrome.
+FinishedLabel=SafeAgent is installed.%n%nGo back to your assessment page in Chrome and press Detect SafeAgent, then run the check again. You do not need to restart Chrome or remove the old version.
 
 [Code]
 var
@@ -50,6 +56,13 @@ begin
       'Finish or leave any assessment you are taking before continuing. Chrome can stay open.', True, False);
     SafetyPage.Add('I am not taking an assessment right now.');
   end;
+end;
+
+// With the Ready page disabled, the last page before installing must say Install.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (SafetyPage <> nil) and (CurPageID = SafetyPage.ID) then
+    WizardForm.NextButton.Caption := SetupMessage(msgButtonInstall);
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -75,8 +88,11 @@ begin
     Result := 'Custom installation paths are not supported. Use the fixed default directory.';
     Exit;
   end;
+  // A registration pointing at a manifest that no longer exists is stale (deleted folder or
+  // half-removed install); overwrite it instead of sending the student to uninstall.
   if RegQueryStringValue(HKCU, 'Software\Google\Chrome\NativeMessagingHosts\com.kalvium.safeagent', '', RegisteredManifest) then
-    if CompareText(RegisteredManifest, ExpandConstant('{app}\com.kalvium.safeagent.json')) <> 0 then
+    if (CompareText(RegisteredManifest, ExpandConstant('{app}\com.kalvium.safeagent.json')) <> 0)
+      and FileExists(RegisteredManifest) then
       Result := 'An older copy of SafeAgent is installed in a different place. Open Windows Settings > Apps, uninstall Kalvium SafeAgent, then run this installer again. If that does not work, contact Kalvium support and mention code SA-REG.';
 end;
 

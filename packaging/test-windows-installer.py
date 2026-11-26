@@ -16,6 +16,14 @@ class WindowsInstallerTests(unittest.TestCase):
         for call in calls:
             self.assertTrue(call.rstrip().endswith("IDYES"), call)
 
+    def test_short_student_path(self):
+        for directive in ("DisableWelcomePage=yes", "DisableReadyPage=yes", "DisableDirPage=yes"):
+            self.assertIn(directive, SCRIPT)
+        self.assertIn("msgButtonInstall", SCRIPT)
+
+    def test_stale_registration_is_overwritten_not_blocking(self):
+        self.assertIn("FileExists(RegisteredManifest)", SCRIPT)
+
 
 if __name__ == "__main__":
     unittest.main()
