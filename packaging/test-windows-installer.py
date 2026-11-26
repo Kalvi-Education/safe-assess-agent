@@ -21,6 +21,13 @@ class WindowsInstallerTests(unittest.TestCase):
             self.assertIn(directive, SCRIPT)
         self.assertIn("msgButtonInstall", SCRIPT)
 
+    def test_silent_update_never_blocked_by_wizard_page(self):
+        # B1 (Dev VM 26 Nov): /VERYSILENT update aborted with EAbort because the unticked
+        # safety page returned False from NextButtonClick.
+        body = SCRIPT[SCRIPT.index("function NextButtonClick"):]
+        body = body[:body.index("end;")]
+        self.assertLess(body.index("WizardSilent"), body.index("SafetyPage.Values[0]"))
+
     def test_stale_registration_is_overwritten_not_blocking(self):
         self.assertIn("FileExists(RegisteredManifest)", SCRIPT)
 
