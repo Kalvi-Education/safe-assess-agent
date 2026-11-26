@@ -449,3 +449,74 @@ fn mac_team_id_matches_renamed_app_and_user_writable_paths() {
         home
     ));
 }
+
+#[test]
+fn catalog_0_2_4_detects_student_facing_apps_by_process_name() {
+    for (process, id, category) in [
+        ("WhatsApp.exe", "application:whatsapp", "communication"),
+        ("Telegram.exe", "application:telegram", "communication"),
+        ("Signal.exe", "application:signal", "communication"),
+        ("parsecd.exe", "application:parsec", "remote-desktop"),
+        (
+            "QuickAssist.exe",
+            "application:quick-assist",
+            "remote-desktop",
+        ),
+        ("Cursor.exe", "application:cursor", "editor"),
+        ("chromedriver.exe", "application:selenium", "editor"),
+        ("autoit3.exe", "application:autoit", "editor"),
+        ("Gemini", "application:gemini", "ai-assistant"),
+        ("bandicam.exe", "application:bandicam", "screen-recorder"),
+        ("ManyCam.exe", "application:manycam", "screen-recorder"),
+    ] {
+        let findings = probes::group_applications([process]);
+        let hit = findings.iter().find(|f| f.id == id);
+        assert!(hit.is_some(), "{process} should be detected as {id}");
+        assert_eq!(hit.unwrap().category, category, "{process}");
+    }
+}
+
+#[test]
+fn catalog_0_2_4_does_not_flag_ordinary_apps_or_generic_names() {
+    let ordinary = [
+        "chrome.exe",
+        "explorer.exe",
+        "svchost.exe",
+        "msedge.exe",
+        "Spotify.exe",
+        "chat.exe",
+        "line.exe",
+        "element.exe",
+        "jan.exe",
+        "poe.exe",
+        "Finder",
+        "Google Chrome",
+    ];
+    let findings = probes::group_applications(ordinary);
+    assert!(
+        findings.iter().all(|f| !f.id.starts_with("application:")),
+        "unexpected app findings: {:?}",
+        findings.iter().map(|f| &f.id).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn catalog_0_2_4_publisher_match_catches_renamed_messengers() {
+    use safeagent::signing::{Executable, Signature};
+    for (signer, id) in [
+        ("WhatsApp LLC", "application:whatsapp"),
+        ("57T9237FN3", "application:whatsapp"),
+        ("6N38VWS5BX", "application:telegram"),
+        ("VDXQ22DGB9", "application:cursor"),
+    ] {
+        let renamed = Executable {
+            signature: Signature::Signed(signer.into()),
+            company: None,
+            original_filename: None,
+            user_writable: false,
+            is_self: false,
+        };
+        let findings = probes::group_processes([("notes.exe", Some(&renamed))]);
+        assert!(findings.iter().any(|f| f.id == id), "{signer} -> {id}");
+    }
+}

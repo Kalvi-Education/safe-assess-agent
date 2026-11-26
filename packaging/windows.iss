@@ -68,6 +68,9 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
+  // Silent installs confirm in InitializeSetup; the unticked wizard page must not abort them.
+  if WizardSilent then
+    Exit;
   if (SafetyPage <> nil) and (CurPageID = SafetyPage.ID) then
     Result := SafetyPage.Values[0];
 end;
