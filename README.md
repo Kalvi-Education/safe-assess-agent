@@ -12,7 +12,7 @@ not become clean scans or automatic penalties.
 
 ## Current scope
 
-- Version **0.2.x** (patch bumped per published build), wire protocol **2**. 0.2.2 adds signer/version-info matching, remote-session/service, VM and unverified-executable findings (see protocol.md). Monitoring requires a signed v2 grant
+- Version **0.2.x** (patch bumped per published build), wire protocol **2**. 0.2.2 adds signer/version-info matching, remote-session/service, VM and unverified-executable findings. 0.2.5 adds signed results (OS-held P-256 device key), self-reported build hash/signer and a Chrome parent check; see protocol.md "Result attestation". A valid signature proves which install produced a result, not that the agent is untampered. Monitoring requires a signed v2 grant
   on the same native port; advisory one-shot preflight uses a separate signed
   v3 grant. Legacy v1 and unauthenticated observations are rejected.
 - `hello` is metadata-only. `ok: true` does not establish readiness;
@@ -39,7 +39,9 @@ not become clean scans or automatic penalties.
 | [Release operations](release.md) | Intentional dormant production signing/publication path, installer lifecycle and rollback |
 | [Threat model](docs/threat-model.md) | Technique classes, current signals and residual risk |
 | [Signed results proposal](docs/protocol-v3-proposal.md) | Proposed install key + agent-signed results (not implemented) |
-| [Key rotation](docs/key-rotation.md) | Ring rules, scheduled rotation and emergency revocation |
+| [Key rotation and recovery](docs/key-rotation.md) | Ring rules, rotation, emergency revocation, recovery scopes and suspicious-signal handling |
+| [Hardening plan](docs/security-hardening-plan.md) | Items 1-7, decisions, cross-repo contract |
+| [Pilot release validation](docs/pilot-release-validation.md) | Single acceptance checklist: automated gates and post-packaging runtime tests |
 | [Student update flow](docs/upgrade-flow.md) | In-place upgrade guarantees and the HIBu/backend update contract |
 | [Configuration template](.env.example) | Build inputs and workflow configuration; not automatically loaded |
 

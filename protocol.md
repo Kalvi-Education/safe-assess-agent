@@ -194,6 +194,101 @@ create/issue/complete operations. No active monitoring session is required.
 Unavailable results must be visible and never block admission; local/dev is
 advisory only, with no enforcement in this implementation.
 
+## Result attestation (0.2.5, additive)
+
+Added fields only. Existing v2 fields, codes and grant payloads are unchanged, so HIBu and the
+backend keep working until they adopt these fields.
+
+### Device key
+
+- ECDSA P-256 / SHA-256. TPM and Secure Enclave keys are P-256 only.
+- Windows: CNG key `Kalvium SafeAgent Result Key`, per user, non-exportable. `Microsoft Platform
+  Crypto Provider` (TPM) first, then `Microsoft Software Key Storage Provider`.
+- macOS: Secure Enclave key tagged `com.kalvium.safeagent.result-key` in the data-protection
+  keychain, this device only. Needs a Developer ID signed build; unsigned builds report
+  `unavailable` (no login-keychain fallback, which would prompt the student for a password).
+- Linux and others: no key (`keyProtection: "unavailable"`).
+- Created on first use, reused afterwards. The private key never leaves the OS key store and is
+  never written to disk by SafeAgent.
+
+### hello additions
+
+`hello` adds `attestation`:
+
+```json
+{"keyProtection":"tpm|secure-enclave|software|unavailable","installPublicKey":"<SPKI DER base64url or null>",
+ "selfHash":"<sha256 hex of the running image or null>","selfSigner":"<Authenticode subject / Team ID or null>",
+ "parent":"trusted|untrusted|unknown"}
+```
+
+The server registers `installPublicKey` against student + device and checks `selfHash` against the
+release hashes. Metadata only: `hello` still never probes.
+
+### Parent check
+
+Before `authorize`, `preflight` or `check` does anything, SafeAgent resolves the image of the
+process that launched it and verifies its signature:
+
+- Windows: signer subject `Google LLC` and image name `chrome.exe`. If the parent is `cmd.exe`
+  (Chrome may launch hosts through `cmd.exe`, controlled by the Chrome policy
+  `NativeHostsExecutablesLaunchDirectly`), its own parent must be signed Chrome.
+- macOS: Team ID `EQHXZ8M8AV` (Google), Chrome main or helper binary.
+- Anything else: `ok: false`, `error.code: UNTRUSTED_PARENT`, findings `[]`, nothing scanned.
+- Parent identity that cannot be read is `unknown`, which is treated as untrusted.
+- Dev builds may disable the check with the compile-time variable
+  `SAFEAGENT_ALLOW_ANY_PARENT=true` for local smoke tests. Release builds reject that variable.
+
+### Signed results
+
+Every `preflight` and `check` reply that ran an observation (success or `PROBE_FAILED`) adds:
+
+- `signedResult`: base64url of the exact UTF-8 bytes that were signed.
+- `resultSignature`: base64url DER ECDSA P-256 / SHA-256 signature over those bytes.
+
+The signed object is produced once, after the final outcome is known. Consumers verify these
+bytes, parse **only** the decoded bytes for every decision, and never re-serialise. Outer reply
+fields (`ok`, `error`, `findings`, `capabilities`, `authState`) are for display only.
+
+```json
+{"v":1,"domain":"kalvium.safeagent.result.v1","purpose":"assessment-preflight|monitoring",
+ "ok":true,"errorCode":null,"authState":"unauthorized|authorized",
+ "preflightId":"<or null>","sessionId":"<or null>",
+ "challenge":"<authChallenge>","agentInstanceId":"...","agentVersion":"0.2.5","observedAt":0,
+ "capabilities":{"displays":"available","overlays":"available","processes":"available"},
+ "findings":[{"id":"...","category":"...","count":1}],
+ "attestation":{"keyProtection":"tpm","selfHash":"...","selfSigner":null,"parent":"trusted"}}
+```
+
+- `domain` separates these bytes from any other signature the key might make.
+- Binding: `challenge` and `agentInstanceId` are fresh per connection, so a result from one
+  connection cannot be presented for another. `preflightId` / `sessionId` bind the grant.
+- **Repeated monitoring checks** on one connection share `challenge`; the server must require
+  strictly increasing `observedAt` per session. A server-issued per-check nonce is a later,
+  separately negotiated grant version (hardening plan item 6).
+- When the key is unavailable both fields are absent: an unsigned result the server must treat as
+  untrusted, never as clean.
+- `AUTH_EXPIRED`, `UNTRUSTED_PARENT` and pre-authorization errors are never signed.
+- Grant payloads are unchanged in 0.2.5.
+
+### Key and integrity caveats
+
+- Windows reuses an existing key only if it is ECDSA_P256, 256-bit, with no export policy bits;
+  otherwise nothing is signed with it. macOS reuses only a Secure Enclave key under its tag.
+- Non-exportable means the key cannot be copied off the device; any process running as the same
+  user can still ask the OS to sign with it.
+- `selfHash`, `selfSigner` and `parent` are **self-reported** by the agent. They are evidence for
+  the server's allowlist and review, not independent runtime attestation.
+- Parent identity is evaluated once per connection (one host process per Chrome connection) and
+  cached. On macOS the trust decision re-checks Chrome's executable against
+  `anchor apple generic and certificate leaf[subject.OU] = "EQHXZ8M8AV"`. On Windows the parent is
+  verified with `WinVerifyTrust` (offline, no revocation fetch); the `cmd.exe` intermediary is
+  accepted only from `System32`/`SysWOW64`, signed `Microsoft Windows`, under signed Chrome.
+- The test-only compile-time `SAFEAGENT_ALLOW_ANY_PARENT` is rejected by `validate-auth-config`,
+  by `smoke-native.py` and by Internal Dev provenance, which run `safeagent --build-info` on the
+  actual release binary (`parentCheck=enforced`).
+
+New error code: `UNTRUSTED_PARENT`.
+
 ## Replies
 
 All replies contain:
@@ -216,7 +311,7 @@ Codes: INVALID_JSON, INVALID_REQUEST, UNSUPPORTED_VERSION, UNKNOWN_COMMAND,
 MALFORMED_FRAME, FRAME_TOO_LARGE, PROBE_FAILED, UNAUTHORIZED, AUTH_EXPIRED,
 INVALID_AUTHORIZATION, CHALLENGE_MISMATCH, CHALLENGE_REUSED, CHALLENGE_EXPIRED,
 INVALID_SIGNATURE, UNSUPPORTED_CAPABILITY, AUTH_CONFIG_INVALID,
-RANDOM_UNAVAILABLE.
+RANDOM_UNAVAILABLE, UNTRUSTED_PARENT.
 
 ## Observation scope and limitations
 

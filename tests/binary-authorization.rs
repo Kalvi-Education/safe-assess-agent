@@ -78,6 +78,8 @@ fn embedded_key_authorizes_binary_and_runtime_override_is_ignored() {
             "SAFEAGENT_ALLOWED_EXTENSION_IDS",
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         )
+        // cargo test, not Chrome, launches this host; parent enforcement is tested separately.
+        .env("SAFEAGENT_ALLOW_ANY_PARENT", "true")
         .status()
         .unwrap()
         .success());

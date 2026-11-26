@@ -7,6 +7,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             println!("safeagent {}", safeagent::VERSION);
             return Ok(());
         }
+        // Build facts packaging verifies on the actual artifact (never secrets).
+        [command] if command == "--build-info" => {
+            println!(
+                "parentCheck={}",
+                if safeagent::attestation::any_parent_allowed() {
+                    "disabled"
+                } else {
+                    "enforced"
+                }
+            );
+            return Ok(());
+        }
         [command] if command == "check" => {
             let reply = safeagent::check();
             let mut stdout = io::stdout().lock();

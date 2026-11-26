@@ -1,6 +1,6 @@
 [package]
 name = "safeagent"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 publish = false
 
@@ -14,6 +14,8 @@ uuid = "1"
 ed25519-dalek = "2"
 rand = "0.8"
 base64 = { version = "0.22", features = ["std"] }
+# Already in the lock via ed25519-dalek; self hash and result digests.
+sha2 = "0.10"
 
 # Already in the lock via sysinfo; only Win32 bindings for signer/version-info checks.
 [target.'cfg(windows)'.dependencies]
