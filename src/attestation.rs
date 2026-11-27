@@ -223,6 +223,30 @@ impl DeviceKey for NoKey {
     }
 }
 
+/// Windows CNG key policy. Providers name the same key differently (the TPM provider reports
+/// `ECDSA`, the software KSP `ECDSA_P256`), so the curve is taken from the exported public blob:
+/// `BCRYPT_ECDSA_PUBLIC_P256_MAGIC` with 32-byte coordinates. Also requires a 256-bit length and
+/// no export-policy bits. Returns the raw X||Y point when acceptable.
+pub fn cng_p256_point(
+    public_blob: &[u8],
+    length_bits: Option<u32>,
+    export_policy: Option<u32>,
+) -> Option<&[u8]> {
+    const BCRYPT_ECDSA_PUBLIC_P256_MAGIC: u32 = 0x3153_4345; // "ECS1"
+    if length_bits != Some(256) || export_policy != Some(0) || public_blob.len() != 8 + 64 {
+        return None;
+    }
+    let field = |at: usize| {
+        u32::from_le_bytes([
+            public_blob[at],
+            public_blob[at + 1],
+            public_blob[at + 2],
+            public_blob[at + 3],
+        ])
+    };
+    (field(0) == BCRYPT_ECDSA_PUBLIC_P256_MAGIC && field(4) == 32).then(|| &public_blob[8..])
+}
+
 /// Convert a raw P-256 point (X||Y, 64 bytes) to SubjectPublicKeyInfo DER.
 pub fn p256_spki(xy: &[u8]) -> Option<Vec<u8>> {
     if xy.len() != 64 {
@@ -361,6 +385,44 @@ mod tests {
             classify_parent(&[(cmd, signed("Evil Corp")), (chrome, signed(GOOGLE_SIGNER))]),
             Parent::Untrusted
         );
+    }
+
+    #[test]
+    fn cng_policy_accepts_tpm_and_software_p256_and_rejects_others() {
+        let blob = |magic: u32, size: u32, extra: usize| {
+            let mut b = magic.to_le_bytes().to_vec();
+            b.extend(size.to_le_bytes());
+            b.extend(vec![7u8; 2 * size as usize + extra]);
+            b
+        };
+        let p256 = blob(0x3153_4345, 32, 0);
+        // Same public blob whether the provider names it ECDSA (TPM) or ECDSA_P256 (software).
+        assert_eq!(cng_p256_point(&p256, Some(256), Some(0)), Some(&p256[8..]));
+        assert!(
+            cng_p256_point(&p256, Some(256), Some(1)).is_none(),
+            "exportable"
+        );
+        assert!(
+            cng_p256_point(&p256, Some(384), Some(0)).is_none(),
+            "wrong length"
+        );
+        assert!(
+            cng_p256_point(&p256, None, Some(0)).is_none(),
+            "unreadable length"
+        );
+        assert!(
+            cng_p256_point(&blob(0x3353_4345, 48, 0), Some(256), Some(0)).is_none(),
+            "P-384 magic"
+        );
+        assert!(
+            cng_p256_point(&blob(0x3153_4B45, 32, 0), Some(256), Some(0)).is_none(),
+            "ECDH P-256"
+        );
+        assert!(
+            cng_p256_point(&blob(0x3153_4345, 32, 1), Some(256), Some(0)).is_none(),
+            "bad size"
+        );
+        assert!(cng_p256_point(&[], Some(256), Some(0)).is_none());
     }
 
     #[test]
