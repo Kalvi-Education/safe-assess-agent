@@ -128,6 +128,53 @@ Columns: ID · Priority · Platform · Prerequisites · Steps · Expected · Act
 | LIF-06 | P1 | any | Unmanaged profile | Detect + Check | Works | | NOT_RUN | |
 | LIF-07 | P2 | any | — | `UNTRUSTED_PARENT` surfaced in HIBu | A specific student message (HIBu change) | | NOT_RUN | |
 
+## E. Attack-surface sign-off (where students will actually try)
+
+Each row is a real attack a student can attempt on their own laptop, ordered by likelihood × ease.
+"Catch point" is where the attack must fail or be flagged. Expected outcomes are honest: some are
+caught only once the Assessment API verifies signatures (marked **server**). Run on the Dev VM,
+authorized, with the build under test. Status starts NOT_RUN; record evidence for every run.
+
+| ID | Likelihood | Attack (what a student does) | Catch point | Expected today (0.2.6) | Status | Evidence |
+|---|---|---|---|---|---|---|
+| ATK-01 | Very high | Close the cheating app before Check, reopen after Begin | Monitoring (H5), not SafeAgent | Not caught by a one-time check (accepted gap) | NOT_RUN | |
+| ATK-02 | Very high | Rename the cheating app's exe | SafeAgent signer/OriginalFilename match | Caught for signed apps (proven 0.2.4 AnyDesk); unsigned → "Unsigned programs" | NOT_RUN | |
+| ATK-03 | High | Use a tool not in the catalog | Unsigned / user-folder rules, server review | Caught only if unsigned or in user folders | NOT_RUN | |
+| ATK-04 | High | Post a fake "ready" to the API with own token (B13) | **server** signature verify | Accepted today (`client_reported`); must be rejected once API verifies | NOT_RUN | |
+| ATK-05 | High | Wrapper registered in HKCU strips findings (B11) | SafeAgent parent check | `UNTRUSTED_PARENT`, no findings, nothing signed | NOT_RUN | |
+| ATK-06 | Medium | Wrapper launched **by Chrome via cmd.exe** chain | SafeAgent parent check (grandparent) | `UNTRUSTED_PARENT` (parent is the wrapper, not System32 cmd.exe) | NOT_RUN | |
+| ATK-07 | Medium | Edit `signedResult` (e.g. drop a finding) and relay | **server** exact-byte verify | Signature fails (Node verify false); server rejection pending | NOT_RUN | |
+| ATK-08 | Medium | Keep `signedResult`, edit outer `ok`/`findings` | **server** uses signed bytes only | Signed bytes still carry the real outcome; server must ignore outer fields | NOT_RUN | |
+| ATK-09 | Medium | Replay an old clean signed result for a new preflight | **server** preflightId/challenge binding | Mismatch (preflightId, challenge, instance differ) | NOT_RUN | |
+| ATK-10 | Medium | Replace `safeagent.exe` with a patched copy | **server** `selfHash` ∉ approved `binarySha256` | Reports a different `selfHash`; rejected once allowlist exists | NOT_RUN | |
+| ATK-11 | Medium | Patched agent that reports the real hash and signs clean | Residual (R1) | Not caught locally; server consistency + review only | NOT_RUN | |
+| ATK-12 | Low | Plant a weak/exportable key under our CNG name | SafeAgent key policy | Key not used; falls back or `unavailable`; never `tpm` | NOT_RUN | |
+| ATK-13 | Low | Delete the device key between checks | **server** key change = new enrollment | New key; server flags unexpected key change | NOT_RUN | |
+| ATK-14 | Low | Run the host from a terminal / script with a valid origin | SafeAgent parent check | hello metadata only; checks `UNTRUSTED_PARENT` | NOT_RUN | |
+| ATK-15 | Low | Use another browser (Edge/Chromium) with HIBu | Parent check (Chrome only) + HIBu absent | `UNTRUSTED_PARENT` | NOT_RUN | |
+| ATK-16 | Low | Clock moved forward/back | Grant wall + monotonic deadlines | Refused (proven 0.2.4 B14) | NOT_RUN | |
+| ATK-17 | Low | Run inside a VM / via remote desktop | VM + remote-session findings | Reported (proven on GCE/RDP) | NOT_RUN | |
+| ATK-18 | Low | Kill SafeAgent mid-check | HIBu timeout → unavailable | Not clean; Begin blocked in Required (proven 0.2.4 B10) | NOT_RUN | |
+| ATK-19 | Very low | Kernel hook / modified OS lying to a genuine agent | Residual | Not caught (documented limit) | N/A | |
+| ATK-20 | Very low | Second device / phone / helper in the room | Layer 1 + proctor | Out of SafeAgent scope | N/A | |
+
+**Sign-off rule:** every High/Very-high row must be PASS or an explicitly accepted gap with an
+owner. Rows marked **server** stay BLOCKED until the Assessment API verifies signed results;
+SafeAgent's half (correct signed bytes, correct refusal) is verified now.
+
+## F. Automated regression (runs in CI on every PR)
+
+| Gate | Where | What it proves |
+|---|---|---|
+| Real CNG key create → reuse → sign → Node verify | Windows CI runner (software KSP) | Device-key path and verifier interop work on real Windows |
+| CNG key policy (TPM `ECDSA` and KSP `ECDSA_P256` names; reject exportable, wrong length, P-384, ECDH, malformed) | all targets | KEY-01 regression |
+| Parent classification (Chrome, cmd.exe intermediary, impostors, unknown) | all targets (Windows-specific on Windows) | ATK-05/06/14/15 logic |
+| Signed bytes include outcome, binding, attestation; cross-connection difference | all targets | ATK-07/08/09 agent half |
+| Node interop: SPKI and DER accepted; tampered/wrong key/malformed rejected | macOS/Linux with Node | Verifier contract |
+| `--build-info` gate on the packaged binary | packaging | Test bypass cannot ship |
+
+Hosted runners have no TPM; the TPM path is verified on the Dev VM (KEY-01).
+
 ## C. Deferred until trusted signing
 
 | ID | Test | Status |
