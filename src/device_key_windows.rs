@@ -10,9 +10,9 @@ use windows::{
             NCryptCreatePersistedKey, NCryptExportKey, NCryptFinalizeKey, NCryptFreeObject,
             NCryptGetProperty, NCryptOpenKey, NCryptOpenStorageProvider, NCryptSignHash,
             BCRYPT_ECCPUBLIC_BLOB, BCRYPT_ECDSA_P256_ALGORITHM, CERT_KEY_SPEC,
-            MS_KEY_STORAGE_PROVIDER, MS_PLATFORM_CRYPTO_PROVIDER, NCRYPT_ALGORITHM_PROPERTY,
-            NCRYPT_EXPORT_POLICY_PROPERTY, NCRYPT_FLAGS, NCRYPT_HANDLE, NCRYPT_KEY_HANDLE,
-            NCRYPT_LENGTH_PROPERTY, NCRYPT_PROV_HANDLE, NCRYPT_SILENT_FLAG,
+            MS_KEY_STORAGE_PROVIDER, MS_PLATFORM_CRYPTO_PROVIDER, NCRYPT_EXPORT_POLICY_PROPERTY,
+            NCRYPT_FLAGS, NCRYPT_HANDLE, NCRYPT_KEY_HANDLE, NCRYPT_LENGTH_PROPERTY,
+            NCRYPT_PROV_HANDLE, NCRYPT_SILENT_FLAG,
         },
         OBJECT_SECURITY_INFORMATION,
     },
@@ -24,6 +24,7 @@ struct CngKey {
     provider: NCRYPT_PROV_HANDLE,
     key: NCRYPT_KEY_HANDLE,
     protection: KeyProtection,
+    point: Vec<u8>,
 }
 
 impl Drop for CngKey {
@@ -54,24 +55,54 @@ fn property(key: NCRYPT_KEY_HANDLE, name: PCWSTR) -> Option<Vec<u8>> {
     Some(value)
 }
 
-/// An existing key is reused only if it is ECDSA P-256, 256-bit and has no export policy bits.
-/// Anything else (a planted or older key under our name) is not used, and nothing is signed.
-fn acceptable(key: NCRYPT_KEY_HANDLE) -> bool {
-    // CNG returns the algorithm name as NUL-terminated UTF-16LE.
-    let expected: Vec<u8> = "ECDSA_P256\0"
-        .encode_utf16()
-        .flat_map(u16::to_le_bytes)
-        .collect();
-    let algorithm_ok = property(key, NCRYPT_ALGORITHM_PROPERTY).is_some_and(|b| b == expected);
-    let length = property(key, NCRYPT_LENGTH_PROPERTY).and_then(|b| {
+fn u32_property(key: NCRYPT_KEY_HANDLE, name: PCWSTR) -> Option<u32> {
+    property(key, name).and_then(|b| {
         b.get(..4)
             .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-    });
-    let export = property(key, NCRYPT_EXPORT_POLICY_PROPERTY).and_then(|b| {
-        b.get(..4)
-            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-    });
-    algorithm_ok && length == Some(256) && export == Some(0)
+    })
+}
+
+fn public_blob(key: NCRYPT_KEY_HANDLE) -> Option<Vec<u8>> {
+    let mut size = 0u32;
+    unsafe {
+        NCryptExportKey(
+            key,
+            None,
+            BCRYPT_ECCPUBLIC_BLOB,
+            None,
+            None,
+            &mut size,
+            NCRYPT_FLAGS(0),
+        )
+    }
+    .ok()?;
+    let mut blob = vec![0u8; size as usize];
+    unsafe {
+        NCryptExportKey(
+            key,
+            None,
+            BCRYPT_ECCPUBLIC_BLOB,
+            None,
+            Some(&mut blob),
+            &mut size,
+            NCRYPT_FLAGS(0),
+        )
+    }
+    .ok()?;
+    blob.truncate(size as usize);
+    Some(blob)
+}
+
+/// Raw P-256 point if this key meets the policy (curve from the public blob, 256-bit,
+/// non-exportable); otherwise the key is not used and nothing is signed with it.
+fn acceptable_point(key: NCRYPT_KEY_HANDLE) -> Option<Vec<u8>> {
+    let blob = public_blob(key)?;
+    crate::attestation::cng_p256_point(
+        &blob,
+        u32_property(key, NCRYPT_LENGTH_PROPERTY),
+        u32_property(key, NCRYPT_EXPORT_POLICY_PROPERTY),
+    )
+    .map(<[u8]>::to_vec)
 }
 
 fn open_in(provider_name: PCWSTR, protection: KeyProtection) -> Option<CngKey> {
@@ -107,13 +138,15 @@ fn open_in(provider_name: PCWSTR, protection: KeyProtection) -> Option<CngKey> {
             return None;
         }
     }
-    let candidate = CngKey {
+    let mut candidate = CngKey {
         provider,
         key,
         protection,
+        point: Vec::new(),
     };
     // Drop releases both handles when the key does not meet the policy.
-    acceptable(candidate.key).then_some(candidate)
+    candidate.point = acceptable_point(candidate.key)?;
+    Some(candidate)
 }
 
 impl DeviceKey for CngKey {
@@ -122,35 +155,7 @@ impl DeviceKey for CngKey {
     }
 
     fn public_key_spki(&self) -> Option<Vec<u8>> {
-        let mut size = 0u32;
-        unsafe {
-            NCryptExportKey(
-                self.key,
-                None,
-                BCRYPT_ECCPUBLIC_BLOB,
-                None,
-                None,
-                &mut size,
-                NCRYPT_FLAGS(0),
-            )
-        }
-        .ok()?;
-        let mut blob = vec![0u8; size as usize];
-        unsafe {
-            NCryptExportKey(
-                self.key,
-                None,
-                BCRYPT_ECCPUBLIC_BLOB,
-                None,
-                Some(&mut blob),
-                &mut size,
-                NCRYPT_FLAGS(0),
-            )
-        }
-        .ok()?;
-        // BCRYPT_ECCKEY_BLOB header: magic (4) + cbKey (4), then X || Y.
-        let xy = blob.get(8..8 + 64)?;
-        p256_spki(xy)
+        p256_spki(&self.point)
     }
 
     fn sign(&self, message: &[u8]) -> Option<Vec<u8>> {
@@ -172,6 +177,8 @@ impl DeviceKey for CngKey {
     }
 }
 
+/// TPM first. The software key is only opened or created when no acceptable TPM key exists, so a
+/// TPM device never accumulates a second (software) key.
 pub fn open_device_key() -> Box<dyn DeviceKey> {
     if let Some(key) = open_in(MS_PLATFORM_CRYPTO_PROVIDER, KeyProtection::Tpm) {
         return Box::new(key);
