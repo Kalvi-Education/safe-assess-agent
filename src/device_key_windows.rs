@@ -19,6 +19,9 @@ use windows::{
 };
 
 const KEY_NAME: PCWSTR = w!("Kalvium SafeAgent Result Key");
+/// CI-only key name so tests never touch a real installation's key.
+#[cfg(test)]
+const TEST_KEY_NAME: PCWSTR = w!("Kalvium SafeAgent CI Test Key");
 
 struct CngKey {
     provider: NCRYPT_PROV_HANDLE,
@@ -106,6 +109,10 @@ fn acceptable_point(key: NCRYPT_KEY_HANDLE) -> Option<Vec<u8>> {
 }
 
 fn open_in(provider_name: PCWSTR, protection: KeyProtection) -> Option<CngKey> {
+    open_named(provider_name, protection, KEY_NAME)
+}
+
+fn open_named(provider_name: PCWSTR, protection: KeyProtection, name: PCWSTR) -> Option<CngKey> {
     let mut provider = NCRYPT_PROV_HANDLE::default();
     unsafe { NCryptOpenStorageProvider(&mut provider, provider_name, 0) }.ok()?;
     let mut key = NCRYPT_KEY_HANDLE::default();
@@ -113,7 +120,7 @@ fn open_in(provider_name: PCWSTR, protection: KeyProtection) -> Option<CngKey> {
         NCryptOpenKey(
             provider,
             &mut key,
-            KEY_NAME,
+            name,
             CERT_KEY_SPEC(0),
             NCRYPT_SILENT_FLAG,
         )
@@ -125,7 +132,7 @@ fn open_in(provider_name: PCWSTR, protection: KeyProtection) -> Option<CngKey> {
                 provider,
                 &mut key,
                 BCRYPT_ECDSA_P256_ALGORITHM,
-                KEY_NAME,
+                name,
                 CERT_KEY_SPEC(0),
                 NCRYPT_FLAGS(0),
             )
@@ -186,5 +193,50 @@ pub fn open_device_key() -> Box<dyn DeviceKey> {
     match open_in(MS_KEY_STORAGE_PROVIDER, KeyProtection::Software) {
         Some(key) => Box::new(key),
         None => Box::new(NoKey),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Real CNG on the Windows CI runner (software KSP; hosted runners have no TPM).
+    use super::*;
+    use windows::Win32::Security::Cryptography::NCryptDeleteKey;
+
+    #[test]
+    fn software_ksp_key_round_trips_and_is_reused_not_recreated() {
+        let first = open_named(
+            MS_KEY_STORAGE_PROVIDER,
+            KeyProtection::Software,
+            TEST_KEY_NAME,
+        )
+        .expect("CNG software KSP must create an acceptable P-256 key");
+        let spki = first.public_key_spki().expect("public key exports");
+        assert_eq!(spki.len(), 91);
+        let message = b"kalvium safeagent ci signing check";
+        let signature = first.sign(message).expect("signs");
+        // Reopening must return the same persisted key, not a new one.
+        let again = open_named(
+            MS_KEY_STORAGE_PROVIDER,
+            KeyProtection::Software,
+            TEST_KEY_NAME,
+        )
+        .expect("reopens");
+        assert_eq!(again.public_key_spki(), Some(spki.clone()));
+        drop(again);
+        // Verify with Node (the Assessment API verifier) when available.
+        let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        let script = "const c=require('crypto');const [k,m,s]=process.argv.slice(1).map(h=>Buffer.from(h,'hex'));\
+            process.stdout.write(String(c.verify('sha256',m,{key:k,format:'der',type:'spki'},s)))";
+        if let Ok(out) = std::process::Command::new("node")
+            .args(["-e", script, &hex(&spki), &hex(message), &hex(&signature)])
+            .output()
+        {
+            assert_eq!(out.stdout, b"true", "Node must verify the CNG signature");
+        }
+        let key = first.key;
+        std::mem::forget(first);
+        unsafe {
+            let _ = NCryptDeleteKey(key, 0);
+        }
     }
 }
