@@ -203,7 +203,9 @@ backend keep working until they adopt these fields.
 
 - ECDSA P-256 / SHA-256. TPM and Secure Enclave keys are P-256 only.
 - Windows: CNG key `Kalvium SafeAgent Result Key`, per user, non-exportable. `Microsoft Platform
-  Crypto Provider` (TPM) first, then `Microsoft Software Key Storage Provider`.
+  Crypto Provider` (TPM) first; the software KSP is used only when no acceptable TPM key exists.
+  The curve is checked from the exported public blob (P-256 magic, 32-byte coordinates), not the
+  provider-specific algorithm name (the TPM provider reports `ECDSA`, the KSP `ECDSA_P256`).
 - macOS: Secure Enclave key tagged `com.kalvium.safeagent.result-key` in the data-protection
   keychain, this device only. Needs a Developer ID signed build; unsigned builds report
   `unavailable` (no login-keychain fallback, which would prompt the student for a password).
@@ -253,7 +255,7 @@ fields (`ok`, `error`, `findings`, `capabilities`, `authState`) are for display 
 {"v":1,"domain":"kalvium.safeagent.result.v1","purpose":"assessment-preflight|monitoring",
  "ok":true,"errorCode":null,"authState":"unauthorized|authorized",
  "preflightId":"<or null>","sessionId":"<or null>",
- "challenge":"<authChallenge>","agentInstanceId":"...","agentVersion":"0.2.5","observedAt":0,
+ "challenge":"<authChallenge>","agentInstanceId":"...","agentVersion":"0.2.6","observedAt":0,
  "capabilities":{"displays":"available","overlays":"available","processes":"available"},
  "findings":[{"id":"...","category":"...","count":1}],
  "attestation":{"keyProtection":"tpm","selfHash":"...","selfSigner":null,"parent":"trusted"}}
@@ -272,7 +274,7 @@ fields (`ok`, `error`, `findings`, `capabilities`, `authState`) are for display 
 
 ### Key and integrity caveats
 
-- Windows reuses an existing key only if it is ECDSA_P256, 256-bit, with no export policy bits;
+- Windows reuses an existing key only if its public blob is P-256, length 256, with no export policy bits;
   otherwise nothing is signed with it. macOS reuses only a Secure Enclave key under its tag.
 - Non-exportable means the key cannot be copied off the device; any process running as the same
   user can still ask the OS to sign with it.
