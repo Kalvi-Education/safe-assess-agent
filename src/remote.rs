@@ -34,6 +34,9 @@ pub const SERVICES: &[(&str, &str, &[&str], &[&str])] = &[
             "com.carriez.RustDesk_server.plist",
         ],
     ),
+    // Getscreen: Linux unit `getscreen.me.service` confirmed from the vendor .deb. Windows service
+    // and macOS launchd names are unconfirmed (need an installed copy) and intentionally empty.
+    ("getscreen", "Getscreen.me", &[], &[]),
     (
         "chrome-remote-desktop",
         "Chrome Remote Desktop",
@@ -231,6 +234,7 @@ const LINUX_UNITS: &[&[&str]] = &[
     &["anydesk"],
     &["teamviewerd"],
     &["rustdesk"],
+    &["getscreen.me"],
     &["chrome-remote-desktop", "chrome-remote-desktop@"],
     &["x11vnc", "vncserver", "tigervncserver", "wayvnc", "xrdp"],
     &["SplashtopStreamer"],

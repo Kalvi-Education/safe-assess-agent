@@ -303,6 +303,7 @@ mod tests {
             signature: Signature::Signed(signer.into()),
             company: None,
             original_filename: None,
+            product_name: None,
             user_writable: false,
             is_self: false,
         })
@@ -334,6 +335,7 @@ mod tests {
             signature: Signature::Unsigned,
             company: None,
             original_filename: None,
+            product_name: None,
             user_writable: true,
             is_self: false,
         };
