@@ -84,6 +84,14 @@ const APPLICATIONS: &[(&str, &str, &str, &[&str])] = &[
         &["teamviewer", "teamviewer_service", "teamviewer_desktop"],
     ),
     ("rustdesk", "remote-desktop", "RustDesk", &["rustdesk"]),
+    // Names from the vendor installers (Nov 2026): Windows getscreen.exe, macOS Getscreen.me.app,
+    // Linux /opt/getscreen.me/getscreen.me.
+    (
+        "getscreen",
+        "remote-desktop",
+        "Getscreen.me",
+        &["getscreen", "getscreen.me"],
+    ),
     (
         "chrome-remote-desktop",
         "remote-desktop",
@@ -517,6 +525,13 @@ const PUBLISHERS: &[(&str, &[&str])] = &[
     ("windows-app", &["UBF8T346G9"]),
     ("parsec", &["Parsec Cloud, Inc."]),
     ("splashtop", &["Splashtop Inc."]),
+    // Verified from the vendor installers: Authenticode subjects (osslsigncode), macOS Team IDs
+    // (codesign -dv). A renamed copy keeps its signature, so these catch renames.
+    (
+        "rustdesk",
+        &["PURSLANE", "Purslane Tech Pte. Ltd.", "HZF9JMC8YN"],
+    ),
+    ("getscreen", &["POINT B LTD", "Point B Ltd", "C27DXG66ZZ"]),
     ("ultraviewer", &["DucFabulous Co.,ltd"]),
     ("signal", &["Signal Messenger, LLC"]),
     ("webex", &["Cisco Systems, Inc."]),
@@ -540,6 +555,9 @@ fn catalog_index(name: &str, executable: Option<&Executable>) -> Option<usize> {
             .as_deref()
             .and_then(alias_index)
         {
+            return Some(index);
+        }
+        if let Some(index) = executable.product_name.as_deref().and_then(alias_index) {
             return Some(index);
         }
         let signer = match &executable.signature {

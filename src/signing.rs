@@ -20,6 +20,8 @@ pub struct Executable {
     pub signature: Signature,
     pub company: Option<String>,
     pub original_filename: Option<String>,
+    /// Version-info ProductName (Windows). Used as another rename-proof signal.
+    pub product_name: Option<String>,
     pub user_writable: bool,
     pub is_self: bool,
 }
@@ -157,6 +159,7 @@ mod linux_impl {
                 signature,
                 company: None,
                 original_filename: None,
+                product_name: None,
                 user_writable: user_writable_linux(&text, self.home.as_deref()),
                 is_self: self.self_path.as_ref() == Some(&exe),
             });
@@ -258,11 +261,12 @@ mod windows_impl {
                 return Some(found.clone());
             }
             let wide_path = wide(&path);
-            let (company, original_filename) = version_strings(&wide_path);
+            let (company, original_filename, product_name) = version_strings(&wide_path);
             let executable = Rc::new(Executable {
                 signature: self.signature(&wide_path),
                 company,
                 original_filename,
+                product_name,
                 user_writable: user_writable(&path, self.profile.as_deref(), self.temp.as_deref()),
                 is_self: self.self_path.as_deref() == Some(key.as_str()),
             });
@@ -448,16 +452,16 @@ mod windows_impl {
         Some(String::from_utf16_lossy(&buffer[..length as usize]))
     }
 
-    fn version_strings(path: &[u16]) -> (Option<String>, Option<String>) {
+    fn version_strings(path: &[u16]) -> (Option<String>, Option<String>, Option<String>) {
         let size = unsafe { GetFileVersionInfoSizeW(PCWSTR(path.as_ptr()), None) };
         if size == 0 {
-            return (None, None);
+            return (None, None, None);
         }
         let mut block = vec![0u8; size as usize];
         if unsafe { GetFileVersionInfoW(PCWSTR(path.as_ptr()), 0, size, block.as_mut_ptr().cast()) }
             .is_err()
         {
-            return (None, None);
+            return (None, None, None);
         }
         let query = |sub: &str| -> Option<(*const u16, u32)> {
             let mut value = std::ptr::null_mut();
@@ -475,10 +479,10 @@ mod windows_impl {
                 .then_some((value as *const u16, length))
         };
         let Some((translation, length)) = query("\\VarFileInfo\\Translation") else {
-            return (None, None);
+            return (None, None, None);
         };
         if length < 4 {
-            return (None, None);
+            return (None, None, None);
         }
         let (language, codepage) = unsafe { (*translation, *translation.add(1)) };
         let string = |name: &str| {
@@ -492,7 +496,11 @@ mod windows_impl {
                 .to_owned();
             (!text.is_empty()).then_some(text)
         };
-        (string("CompanyName"), string("OriginalFilename"))
+        (
+            string("CompanyName"),
+            string("OriginalFilename"),
+            string("ProductName"),
+        )
     }
 }
 
@@ -623,7 +631,9 @@ mod macos_impl {
             let executable = Rc::new(Executable {
                 signature,
                 company: None,
-                original_filename: bundle,
+                original_filename: None,
+                // macOS: the signing identifier / bundle ID (e.g. com.carriez.rustdesk) survives a rename.
+                product_name: bundle,
                 user_writable: user_writable_mac(&text, home.as_deref()),
                 is_self: *self_path == path,
             });

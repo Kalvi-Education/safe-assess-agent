@@ -307,6 +307,7 @@ fn renamed_binaries_match_by_original_filename_or_publisher() {
         signature,
         company: company.map(str::to_owned),
         original_filename: original.map(str::to_owned),
+        product_name: None,
         user_writable: false,
         is_self: false,
     };
@@ -349,6 +350,7 @@ fn unverified_executables_are_counted_but_never_from_unknown_or_self() {
         signature,
         company: None,
         original_filename: None,
+        product_name: None,
         user_writable,
         is_self,
     };
@@ -432,6 +434,7 @@ fn mac_team_id_matches_renamed_app_and_user_writable_paths() {
         signature: Signature::Signed("53Q6R32WPB".into()),
         company: None,
         original_filename: None,
+        product_name: None,
         user_writable: false,
         is_self: false,
     };
@@ -513,6 +516,7 @@ fn catalog_0_2_4_publisher_match_catches_renamed_messengers() {
             signature: Signature::Signed(signer.into()),
             company: None,
             original_filename: None,
+            product_name: None,
             user_writable: false,
             is_self: false,
         };
@@ -548,4 +552,86 @@ fn linux_helpers_classify_units_sessions_and_paths() {
     assert!(user_writable_linux("/tmp/x", home));
     assert!(!user_writable_linux("/usr/bin/python3", home));
     assert!(!user_writable_linux("/opt/google/chrome/chrome", home));
+}
+
+#[test]
+fn renamed_rustdesk_and_getscreen_are_caught_by_identity_not_filename() {
+    use safeagent::signing::{Executable, Signature};
+    let exe = |signature, company: Option<&str>, original: Option<&str>, product: Option<&str>| {
+        Executable {
+            signature,
+            company: company.map(str::to_owned),
+            original_filename: original.map(str::to_owned),
+            product_name: product.map(str::to_owned),
+            user_writable: false,
+            is_self: false,
+        }
+    };
+    // Real identities read from the vendor installers (Nov 2026).
+    let rustdesk_signed = exe(Signature::Signed("PURSLANE".into()), None, None, None);
+    let rustdesk_stripped = exe(
+        Signature::Unsigned,
+        None,
+        Some("rustdesk.exe"),
+        Some("RustDesk"),
+    );
+    let rustdesk_product_only = exe(Signature::Unknown, None, None, Some("RustDesk"));
+    let rustdesk_mac = exe(
+        Signature::Signed("HZF9JMC8YN".into()),
+        None,
+        None,
+        Some("com.carriez.rustdesk"),
+    );
+    let getscreen_signed = exe(
+        Signature::Signed("POINT B LTD".into()),
+        Some("Point B Ltd"),
+        None,
+        None,
+    );
+    let getscreen_company = exe(
+        Signature::Unsigned,
+        Some("Point B Ltd"),
+        None,
+        Some("Getscreen.me"),
+    );
+    let getscreen_mac = exe(
+        Signature::Signed("C27DXG66ZZ".into()),
+        None,
+        None,
+        Some("com.getscreen.me"),
+    );
+    let innocent = exe(
+        Signature::Signed("Spotify AB".into()),
+        Some("Spotify AB"),
+        None,
+        Some("Spotify"),
+    );
+    let ids = |list: Vec<(&str, &Executable)>| -> Vec<String> {
+        probes::group_processes(list.into_iter().map(|(n, e)| (n, Some(e))))
+            .into_iter()
+            .filter(|f| f.id.starts_with("application:"))
+            .map(|f| f.id)
+            .collect()
+    };
+    for (name, identity, want) in [
+        ("notes.exe", &rustdesk_signed, "application:rustdesk"),
+        ("svc.exe", &rustdesk_stripped, "application:rustdesk"),
+        ("helper.exe", &rustdesk_product_only, "application:rustdesk"),
+        ("Notes", &rustdesk_mac, "application:rustdesk"),
+        ("calc.exe", &getscreen_signed, "application:getscreen"),
+        ("updater.exe", &getscreen_company, "application:getscreen"),
+        ("Helper", &getscreen_mac, "application:getscreen"),
+    ] {
+        assert_eq!(ids(vec![(name, identity)]), [want], "{name}");
+    }
+    // Plain names still work, and an innocent signed app is never matched.
+    assert_eq!(
+        ids(vec![("rustdesk.exe", &innocent)]),
+        ["application:rustdesk"]
+    );
+    assert_eq!(
+        ids(vec![("getscreen.exe", &innocent)]),
+        ["application:getscreen"]
+    );
+    assert_eq!(ids(vec![("Spotify.exe", &innocent)]), Vec::<String>::new());
 }
